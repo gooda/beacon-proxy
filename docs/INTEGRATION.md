@@ -260,6 +260,61 @@ LLM_PROXY_RULES=/path/to/rules beacon-proxy api --host 0.0.0.0 --port 8765
 
 ---
 
+## 7.1 证书安装（HTTPS 拦截）
+
+iOS/Android 等设备需安装 mitmproxy CA 证书后，HTTPS 流量才能正常通过代理。
+
+**HTTP 服务**：API 服务提供证书下载页面，设备配置代理后访问：
+
+```
+http://<API地址>:8765/certificate
+```
+
+**移动端访问**：需将 API 绑定到 `0.0.0.0`，以便同网段设备访问：
+
+```bash
+# 方式一：启动时指定
+beacon-proxy start --with-api --api-host 0.0.0.0
+
+# 方式二：单独启动 API
+beacon-proxy api --host 0.0.0.0
+```
+
+设备在浏览器中访问 `http://<宿主机IP>:8765/certificate`，按页面指引下载并安装证书。
+
+**环境变量**：若 mitmproxy 使用自定义配置目录，可设置 `BEACON_PROXY_CONFDIR` 指向该目录。
+
+---
+
+## 7.2 证书固定（Certificate Pinning）导致 App 网络失败
+
+若 Safari 正常、某 App 仍失败，多为该 App 做了**证书固定**，不信任系统 CA。
+
+**处理**：对使用证书固定的域名启用隧道转发（不解密），让流量直连目标服务器：
+
+```bash
+# 忽略指定域名，使其走隧道（正则，逗号分隔）
+beacon-proxy start --ignore-hosts '.*\\.apple\\.com,.*\\.qq\\.com'
+```
+
+被忽略的域名无法 mock，但 App 可正常联网。仅对需要 mock 的 API 域名不加入 ignore。
+
+---
+
+## 7.3 IP 直连 / HTTPDNS 导致上游证书校验失败
+
+App 通过 HTTPDNS 拿到 IP 后直接用 IP 发起 HTTPS，服务器证书是域名的，代理连接上游时校验失败（`Certificate verify failed: IP address mismatch`）。
+
+**处理**：使用 `--ssl-insecure` / `-k` 跳过上游证书校验：
+
+```bash
+beacon-proxy start --ssl-insecure --with-api
+```
+
+此时仍可拦截并 mock 这些请求，仅上游连接不再校验证书。
+
+---
+
 ## 8. 调用示例
 
 ### cURL

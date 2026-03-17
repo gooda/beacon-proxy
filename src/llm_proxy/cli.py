@@ -129,7 +129,7 @@ def list_rules(
 @app.command()
 def api(
     port: int = typer.Option(8765, "--port", "-p", help="API server port"),
-    host: str = typer.Option("127.0.0.1", "--host", "-H", help="API server host"),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="API bind address (0.0.0.0 for mobile cert install)"),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file or directory path"),
 ) -> None:
     """Start activation API server. UI automation calls this to activate device rules by IP."""
@@ -138,6 +138,7 @@ def api(
     env["LLM_PROXY_RULES"] = str(Path(path).absolute())
     try:
         from llm_proxy.api_server import run_api_server
+        typer.echo(f"Certificate install: http://{host}:{port}/certificate")
         run_api_server(host=host, port=port)
     except ImportError as e:
         typer.echo("API dependencies not installed. Run: pip install fastapi uvicorn", err=True)
@@ -164,6 +165,15 @@ def start(
     port: int = typer.Option(8080, "--port", "-p", help="Proxy port"),
     with_api: bool = typer.Option(False, "--with-api", help="Also start activation API server"),
     api_port: int = typer.Option(8765, "--api-port", help="API server port (when --with-api)"),
+    api_host: str = typer.Option("127.0.0.1", "--api-host", help="API bind address (use 0.0.0.0 for mobile cert install)"),
+    ssl_insecure: bool = typer.Option(
+        False, "--ssl-insecure", "-k",
+        help="Skip upstream server cert verification (for IP-direct/HTTPDNS connections)",
+    ),
+    ignore_hosts: Optional[str] = typer.Option(
+        None, "--ignore-hosts",
+        help="Regex patterns for hosts to tunnel (no TLS intercept). Use for cert-pinned apps. Example: '.*\\.apple\\.com'",
+    ),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file path"),
 ) -> None:
     """Start the proxy server."""
@@ -177,17 +187,23 @@ def start(
         import threading
         from llm_proxy.api_server import run_api_server
         def run_api():
-            run_api_server(host="127.0.0.1", port=api_port)
+            run_api_server(host=api_host, port=api_port)
         t = threading.Thread(target=run_api, daemon=True)
         t.start()
-        typer.echo(f"API server started at http://127.0.0.1:{api_port}")
+        typer.echo(f"API server started at http://{api_host}:{api_port}")
+        typer.echo(f"Certificate install: http://{api_host}:{api_port}/certificate")
 
     addon_path = Path(__file__).parent / "run_addon.py"
-    # mitmdump: headless proxy (mitmproxy 9+ has no python -m mitmproxy)
-    subprocess.run(
-        ["mitmdump", "-s", str(addon_path), "-p", str(port)],
-        env=env,
-    )
+    cmd = ["mitmdump", "-s", str(addon_path), "-p", str(port)]
+    if ssl_insecure:
+        cmd.append("-k")
+        typer.echo("SSL insecure: upstream cert verification disabled (for IP-direct/HTTPDNS)")
+    if ignore_hosts:
+        for pattern in (p.strip() for p in ignore_hosts.split(",") if p.strip()):
+            cmd.extend(["--set", f"ignore_hosts={pattern}"])
+        typer.echo(f"Ignore hosts (tunnel): {ignore_hosts}")
+
+    subprocess.run(cmd, env=env)
 
 
 if __name__ == "__main__":

@@ -1,15 +1,22 @@
 """REST API for activation - UI automation calls to activate device rules."""
 
 import os
+from pathlib import Path
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from llm_proxy.manager.file_based import FileBasedManager
 from llm_proxy.models import ProxyConfig
 
 app = FastAPI(title="Beacon Proxy API", version="0.1.0")
+
+
+def _get_cert_dir() -> Path:
+    """mitmproxy 证书目录，默认 ~/.mitmproxy"""
+    return Path(os.environ.get("BEACON_PROXY_CONFDIR", os.path.expanduser("~/.mitmproxy")))
 
 
 def _get_manager() -> FileBasedManager:
@@ -79,6 +86,95 @@ def get_activation_for_ip(client_ip: str) -> dict:
         "rule_count": len(rules),
         "rules": [{"id": r.id, "url_pattern": r.url_pattern} for r in rules],
     }
+
+
+# --- 证书安装 ---
+
+@app.get("/certificate", response_class=HTMLResponse)
+def certificate_install_page() -> HTMLResponse:
+    """证书安装说明页，含各平台下载链接。设备配置代理后访问此页面下载证书。"""
+    cert_dir = _get_cert_dir()
+    cer_path = cert_dir / "mitmproxy-ca-cert.cer"
+    pem_path = cert_dir / "mitmproxy-ca-cert.pem"
+    has_cer = cer_path.exists()
+    has_pem = pem_path.exists()
+    if not has_cer and not has_pem:
+        html = _cert_error_html("证书尚未生成，请先启动代理 (beacon-proxy start) 后再访问。")
+        return HTMLResponse(content=html, status_code=503)
+
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Beacon Proxy 证书安装</title>
+  <style>
+    body {{ font-family: -apple-system, sans-serif; max-width: 600px; margin: 2em auto; padding: 0 1em; }}
+    h1 {{ font-size: 1.25em; }}
+    .btn {{ display: inline-block; margin: 0.5em 0.5em 0.5em 0; padding: 0.6em 1.2em; background: #007aff; color: white; text-decoration: none; border-radius: 8px; }}
+    .btn:hover {{ opacity: 0.9; }}
+    .step {{ margin: 1.5em 0; padding-left: 1em; border-left: 3px solid #ddd; }}
+    code {{ background: #f5f5f5; padding: 0.2em 0.4em; border-radius: 4px; }}
+  </style>
+</head>
+<body>
+  <h1>Beacon Proxy 证书安装</h1>
+  <p>请根据设备类型下载并安装证书，用于 HTTPS 流量拦截。</p>
+
+  <h2>下载证书</h2>
+  <p>
+    {_cert_link("cer", "iOS / 通用 (.cer)") if has_cer else ""}
+    {_cert_link("pem", "Android / curl (.pem)") if has_pem else ""}
+  </p>
+
+  <h2>iOS 安装步骤</h2>
+  <div class="step">
+    <p>1. 点击上方「iOS / 通用 (.cer)」下载</p>
+    <p>2. 安装描述文件（设置 → 已下载描述文件）</p>
+    <p>3. <strong>重要</strong>：设置 → 通用 → 关于本机 → 证书信任设置 → 启用「mitmproxy」信任</p>
+  </div>
+
+  <h2>Android 安装步骤</h2>
+  <div class="step">
+    <p>1. 下载 .pem 文件</p>
+    <p>2. 设置 → 安全 → 安装证书 → 选择 CA 证书</p>
+  </div>
+
+  <p style="color:#666; font-size:0.9em;">证书路径：<code>{cert_dir}</code></p>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+@app.get("/certificate/download")
+def certificate_download(format: str = "cer"):
+    """下载证书文件。format: cer (iOS) 或 pem (Android/curl)。"""
+    cert_dir = _get_cert_dir()
+    if format == "cer":
+        path = cert_dir / "mitmproxy-ca-cert.cer"
+        media_type = "application/x-x509-ca-cert"
+        filename = "mitmproxy-ca-cert.cer"
+    elif format == "pem":
+        path = cert_dir / "mitmproxy-ca-cert.pem"
+        media_type = "application/x-pem-file"
+        filename = "mitmproxy-ca-cert.pem"
+    else:
+        raise HTTPException(status_code=400, detail="format 必须是 cer 或 pem")
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="证书文件不存在，请先启动代理")
+    return FileResponse(path=path, media_type=media_type, filename=filename)
+
+
+def _cert_link(fmt: str, label: str) -> str:
+    return f'<a class="btn" href="/certificate/download?format={fmt}">{label}</a>'
+
+
+def _cert_error_html(msg: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>证书安装</title></head>
+<body><h1>Beacon Proxy</h1><p>{msg}</p></body>
+</html>"""
 
 
 def run_api_server(host: str = "127.0.0.1", port: int = 8765) -> None:
