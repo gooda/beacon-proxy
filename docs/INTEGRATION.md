@@ -286,7 +286,29 @@ beacon-proxy api --host 0.0.0.0
 
 ---
 
-## 7.2 证书固定（Certificate Pinning）导致 App 网络失败
+## 7.2 系统级请求过滤（默认开启）
+
+代理会收到大量系统级请求（iCloud、Apple、埋点、Sentry、HTTPDNS 等），这些通常不需要 mock，且会增加日志噪音和 TLS 握手失败（证书固定）。
+
+**默认行为**：`--ignore-system` 默认开启，将常见系统/分析域名走隧道转发（不解密），减少无意义拦截。
+
+覆盖范围：`*.icloud.com`、`*.apple.com`、`*.sentry*`、`*collect*`、`*metric*`、`*analytics*`、HTTPDNS、Google Analytics 等。
+
+**关闭**：若需拦截上述域名，使用 `--no-ignore-system`：
+
+```bash
+beacon-proxy start --no-ignore-system --with-api
+```
+
+**额外忽略**：可与 `--ignore-hosts` 叠加，例如：
+
+```bash
+beacon-proxy start --ignore-hosts '.*\\.qq\\.com'
+```
+
+---
+
+## 7.3 证书固定（Certificate Pinning）导致 App 网络失败
 
 若 Safari 正常、某 App 仍失败，多为该 App 做了**证书固定**，不信任系统 CA。
 
@@ -301,7 +323,7 @@ beacon-proxy start --ignore-hosts '.*\\.apple\\.com,.*\\.qq\\.com'
 
 ---
 
-## 7.3 IP 直连 / HTTPDNS 导致上游证书校验失败
+## 7.4 IP 直连 / HTTPDNS 导致上游证书校验失败
 
 App 通过 HTTPDNS 拿到 IP 后直接用 IP 发起 HTTPS，服务器证书是域名的，代理连接上游时校验失败（`Certificate verify failed: IP address mismatch`）。
 

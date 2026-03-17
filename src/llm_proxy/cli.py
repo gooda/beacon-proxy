@@ -11,6 +11,26 @@ import typer
 from llm_proxy.manager.file_based import FileBasedManager
 from llm_proxy.models import InterceptRule, ProxyConfig
 
+# 默认忽略的系统/分析域名（隧道转发，不解密），减少无意义的拦截
+DEFAULT_IGNORE_SYSTEM = [
+    r".*\.icloud\.com",           # Apple iCloud
+    r".*\.apple\.com",            # Apple 系统
+    r".*\.itunes\.apple\.com",    # App Store
+    r".*sentry.*",               # Sentry 错误上报
+    r".*collect.*",              # 通用采集/埋点
+    r".*metric.*",               # 指标上报
+    r".*analytics.*",            # 分析
+    r".*telemetry.*",            # 遥测
+    r"httpdns\..*",              # HTTPDNS
+    r".*\.googletagmanager\.com",
+    r".*\.google-analytics\.com",
+    r".*\.firebaseio\.com",
+    r"statistic\.live\.126\.net",  # 网易统计
+    r"c\.ws\.126\.net",           # 网易采集
+    r"mam\.netease\.com",         # 网易指标
+    r"nstool\.netease\.com",      # 网易网络工具
+]
+
 app = typer.Typer(help="Beacon Proxy - UI automation testing proxy")
 
 
@@ -174,6 +194,10 @@ def start(
         None, "--ignore-hosts",
         help="Regex patterns for hosts to tunnel (no TLS intercept). Use for cert-pinned apps. Example: '.*\\.apple\\.com'",
     ),
+    ignore_system: bool = typer.Option(
+        True, "--ignore-system/--no-ignore-system",
+        help="Ignore common system/analytics domains (iCloud, Sentry, metrics, etc.) - tunnel without intercept",
+    ),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file path"),
 ) -> None:
     """Start the proxy server."""
@@ -198,10 +222,16 @@ def start(
     if ssl_insecure:
         cmd.append("-k")
         typer.echo("SSL insecure: upstream cert verification disabled (for IP-direct/HTTPDNS)")
+
+    patterns: list[str] = []
+    if ignore_system:
+        patterns.extend(DEFAULT_IGNORE_SYSTEM)
+        typer.echo("Ignore system: enabled (iCloud, Sentry, metrics, analytics, etc.)")
     if ignore_hosts:
-        for pattern in (p.strip() for p in ignore_hosts.split(",") if p.strip()):
-            cmd.extend(["--set", f"ignore_hosts={pattern}"])
-        typer.echo(f"Ignore hosts (tunnel): {ignore_hosts}")
+        patterns.extend(p.strip() for p in ignore_hosts.split(",") if p.strip())
+        typer.echo(f"Ignore hosts (extra): {ignore_hosts}")
+    for pattern in patterns:
+        cmd.extend(["--set", f"ignore_hosts={pattern}"])
 
     subprocess.run(cmd, env=env)
 
