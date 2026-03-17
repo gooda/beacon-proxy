@@ -14,6 +14,16 @@ pip install -e .
 
 ## 使用
 
+### 快速启动
+
+```bash
+# 使用启动脚本（代理 + API，推荐）
+./scripts/start.sh
+
+# 自定义端口
+./scripts/start.sh --port 8080 --api-port 8765 --rules rules
+```
+
 ### CLI
 
 ```bash

@@ -3,6 +3,7 @@
 import os
 from typing import Optional
 
+from llm_proxy.generator import generate_rules_from_requirement
 from llm_proxy.manager.file_based import FileBasedManager
 from llm_proxy.models import InterceptRule, ProxyConfig
 
@@ -118,6 +119,26 @@ def create_mcp_server() -> "FastMCP":
             return "No rules"
         lines = [f"  {r.id}: {r.url_pattern} -> status={r.status_code}, body={r.body is not None}" + (f" ({r.description})" if r.description else "") for r in rules]
         return "\n".join(lines)
+
+    @mcp.tool()
+    def generate_from_requirement(
+        requirement: str,
+        device_id: str = "default",
+        client_ip: str = "",
+    ) -> str:
+        """根据代理需求自动生成规则并生效。requirement: 自然语言，如 登录失败、购物车空、/api/xxx 返回 500。device_id: 设备ID。client_ip: 被测设备IP，必填以激活。"""
+        if not client_ip:
+            return "client_ip 必填，用于激活规则"
+        manager = _get_manager()
+        rules = generate_rules_from_requirement(requirement)
+        if not rules:
+            return "无法解析需求，请使用：登录失败、购物车空、X 返回 Y、X 空 或 /api/xxx"
+        rule_ids = []
+        for rule in rules:
+            manager.add_rule(rule, device_id)
+            rule_ids.append(rule.id)
+        manager.activate(device_id, client_ip, rule_ids)
+        return f"已生成并激活 {rule_ids}：{device_id} -> {client_ip}"
 
     return mcp
 

@@ -6,10 +6,11 @@ from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
+from llm_proxy.generator import generate_rules_from_requirement
 from llm_proxy.manager.file_based import FileBasedManager
-from llm_proxy.models import ProxyConfig
+from llm_proxy.models import InterceptRule, ProxyConfig
 
 app = FastAPI(title="Beacon Proxy API", version="0.1.0")
 
@@ -33,6 +34,49 @@ class ActivateRequest(BaseModel):
 class ActivateResponse(BaseModel):
     ok: bool
     message: str
+
+
+class GenerateRequest(BaseModel):
+    """根据代理需求生成规则并生效。"""
+
+    requirement: str = Field(..., description="自然语言需求，如：登录失败、购物车空、/api/xxx 返回 500")
+    device_id: str = Field(default="default", description="设备 ID")
+    client_ip: str = Field(..., description="客户端 IP（被测设备），用于激活")
+
+
+class GenerateResponse(BaseModel):
+    ok: bool
+    message: str
+    rule_ids: List[str] = Field(default_factory=list, description="生成的规则 ID 列表")
+
+
+@app.post("/api/generate", response_model=GenerateResponse)
+def generate_and_activate(req: GenerateRequest) -> GenerateResponse:
+    """
+    根据代理需求自动生成规则、写入服务并激活。
+
+    支持需求格式：
+    - 预设：登录失败、购物车空
+    - X 返回 Y：如「登录 返回 500」
+    - X 空：如「购物车 空」
+    - 直接 URL：/api/login
+    """
+    manager = _get_manager()
+    rules = generate_rules_from_requirement(req.requirement)
+    if not rules:
+        raise HTTPException(status_code=400, detail="无法解析需求，请使用：登录失败、购物车空、X 返回 Y、X 空 或 /api/xxx")
+
+    rule_ids: List[str] = []
+    for rule in rules:
+        manager.add_rule(rule, req.device_id)
+        rule_ids.append(rule.id)
+
+    manager.activate(req.device_id, req.client_ip, rule_ids)
+    return GenerateResponse(
+        ok=True,
+        message=f"已生成 {len(rule_ids)} 条规则并激活：{req.device_id} -> {req.client_ip}",
+        rule_ids=rule_ids,
+    )
 
 
 @app.post("/api/activate", response_model=ActivateResponse)

@@ -89,7 +89,50 @@ POST /api/activate
 }
 ```
 
-### 3.2 按设备取消激活
+### 3.2 根据需求生成规则并激活
+
+输入自然语言代理需求，自动生成规则、写入服务并激活。
+
+```
+POST /api/generate
+```
+
+**请求体**：
+
+| 字段        | 类型   | 必填 | 说明                    |
+| ----------- | ------ | ---- | ----------------------- |
+| requirement | string | 是   | 自然语言需求            |
+| device_id   | string | 否   | 设备 ID，默认 `default` |
+| client_ip   | string | 是   | 被测设备 IP，用于激活   |
+
+**支持的需求格式**：
+
+- 预设：`登录失败`、`购物车空`
+- `X 返回 Y`：如 `用户 返回 404`、`/api/order 返回 500`
+- `X 空`：如 `购物车 空`
+- 直接 URL：`/api/login`（默认返回 500）
+
+**请求示例**：
+
+```json
+{
+  "requirement": "登录失败",
+  "device_id": "device_A",
+  "client_ip": "192.168.1.101"
+}
+```
+
+**响应**（200）：
+
+```json
+{
+  "ok": true,
+  "message": "已生成 1 条规则并激活：device_A -> 192.168.1.101",
+  "rule_ids": ["login_500"]
+}
+```
+
+### 3.3 按设备取消激活
 
 取消该设备的所有 IP 绑定。
 
@@ -108,7 +151,7 @@ DELETE /api/activate/{device_id}
 
 **错误**（404）：设备未在激活列表中。
 
-### 3.3 按 IP 取消激活
+### 3.4 按 IP 取消激活
 
 取消指定 IP 的激活。
 
@@ -129,7 +172,7 @@ DELETE /api/activate/ip/{client_ip}
 
 **错误**（404）：该 IP 未激活。
 
-### 3.4 列出所有激活
+### 3.5 列出所有激活
 
 ```
 GET /api/activate
@@ -149,7 +192,7 @@ GET /api/activate
 }
 ```
 
-### 3.5 查询某 IP 的激活信息
+### 3.6 查询某 IP 的激活信息
 
 ```
 GET /api/activate/ip/{client_ip}
@@ -342,6 +385,11 @@ beacon-proxy start --ssl-insecure --with-api
 ### cURL
 
 ```bash
+# 根据需求生成并激活（一步完成）
+curl -X POST http://127.0.0.1:8765/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"requirement":"登录失败","device_id":"device_A","client_ip":"192.168.1.101"}'
+
 # 激活
 curl -X POST http://127.0.0.1:8765/api/activate \
   -H "Content-Type: application/json" \
@@ -439,4 +487,4 @@ beacon-proxy list-rules --device-id device_A
 beacon-proxy start --with-api --rules rules
 ```
 
-**MCP**：供 Cursor 等 AI 客户端调用，支持 `add_rule`、`activate`、`deactivate` 等工具，用于交互式调试。
+**MCP**：供 Cursor 等 AI 客户端调用，支持 `generate_from_requirement`（根据需求自动生成并激活）、`add_rule`、`activate`、`deactivate` 等工具，用于交互式调试。

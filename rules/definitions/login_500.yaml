@@ -1,4 +1,5 @@
 body: null
+description: 登录接口返回500
 id: login_500
 status_code: 500
 url_pattern: /api/login
