@@ -1,0 +1,128 @@
+"""MCP server - interactive debugging use."""
+
+import os
+from typing import Optional
+
+from llm_proxy.manager.file_based import FileBasedManager
+from llm_proxy.models import InterceptRule, ProxyConfig
+
+try:
+    from mcp.server.fastmcp import FastMCP
+except ImportError:
+    FastMCP = None  # type: ignore
+
+
+def _get_manager() -> FileBasedManager:
+    path = os.environ.get("LLM_PROXY_RULES", "rules.yaml")
+    return FileBasedManager(path, ProxyConfig())
+
+
+def create_mcp_server() -> "FastMCP":
+    """Create MCP server with proxy tools. Requires: pip install mcp"""
+    if FastMCP is None:
+        raise ImportError("MCP not installed. Run: pip install mcp")
+
+    mcp = FastMCP("LLM Proxy")
+
+    @mcp.tool()
+    def add_rule(
+        url_pattern: str,
+        rule_id: Optional[str] = None,
+        description: Optional[str] = None,
+        status_code: Optional[int] = None,
+        body: Optional[str] = None,
+        use_regex: bool = False,
+        device_id: Optional[str] = None,
+    ) -> str:
+        """Add an intercept rule. url_pattern: URL to match. description: rule description. status_code: override response code. body: override response body. device_id: for per-device rules."""
+        manager = _get_manager()
+        rules = manager.get_intercept_rules(device_id)
+        rid = rule_id or f"rule_{len(rules) + 1}"
+        rule = InterceptRule(
+            id=rid,
+            url_pattern=url_pattern,
+            description=description,
+            status_code=status_code,
+            body=body,
+            use_regex=use_regex,
+        )
+        manager.add_rule(rule, device_id)
+        target = f" (device={device_id})" if device_id else ""
+        return f"Added rule {rid}: {url_pattern}{target}"
+
+    @mcp.tool()
+    def remove_rule(rule_id: str, device_id: Optional[str] = None) -> str:
+        """Remove an intercept rule. device_id: unbind from device only. Omit to delete definition."""
+        manager = _get_manager()
+        if manager.remove_rule(rule_id, device_id):
+            return f"Removed rule {rule_id}"
+        return f"Rule {rule_id} not found"
+
+    @mcp.tool()
+    def bind_rule(rule_id: str, device_id: str) -> str:
+        """Bind a rule definition to a device (reuse mode)."""
+        manager = _get_manager()
+        if manager.bind_rule(rule_id, device_id):
+            return f"Bound {rule_id} to {device_id}"
+        return f"Failed: rule {rule_id} not found"
+
+    @mcp.tool()
+    def unbind_rule(rule_id: str, device_id: str) -> str:
+        """Unbind a rule from a device (reuse mode)."""
+        manager = _get_manager()
+        if manager.unbind_rule(rule_id, device_id):
+            return f"Unbound {rule_id} from {device_id}"
+        return f"Rule {rule_id} not bound to {device_id}"
+
+    @mcp.tool()
+    def list_definitions() -> str:
+        """List all rule definitions (reuse mode)."""
+        manager = _get_manager()
+        rules = manager.list_definitions()
+        if not rules:
+            return "No definitions"
+        lines = [f"  {r.id}: {r.url_pattern} -> status={r.status_code}" + (f" ({r.description})" if r.description else "") for r in rules]
+        return "\n".join(lines)
+
+    @mcp.tool()
+    def activate(device_id: str, client_ip: str, rule_ids: Optional[list] = None) -> str:
+        """Activate device rules for client IP. UI automation calls before test. rule_ids: optional override."""
+        manager = _get_manager()
+        manager.activate(device_id, client_ip, rule_ids)
+        return f"Activated {device_id} for IP {client_ip}"
+
+    @mcp.tool()
+    def deactivate(device_id: Optional[str] = None, client_ip: Optional[str] = None) -> str:
+        """Deactivate. Provide device_id or client_ip."""
+        manager = _get_manager()
+        if manager.deactivate(device_id=device_id, client_ip=client_ip):
+            return "Deactivated"
+        return "Not found in activations"
+
+    @mcp.tool()
+    def list_activations() -> str:
+        """List all activations (ip_to_device, device_rule_overrides)."""
+        manager = _get_manager()
+        acts = manager.list_activations()
+        if not acts.get("ip_to_device"):
+            return "No activations"
+        lines = [f"  {ip} -> {did}" for ip, did in acts["ip_to_device"].items()]
+        return "\n".join(lines)
+
+    @mcp.tool()
+    def list_rules(device_id: Optional[str] = None) -> str:
+        """List intercept rules for device. device_id: device to list."""
+        manager = _get_manager()
+        rules = manager.get_intercept_rules(device_id)
+        if not rules:
+            return "No rules"
+        lines = [f"  {r.id}: {r.url_pattern} -> status={r.status_code}, body={r.body is not None}" + (f" ({r.description})" if r.description else "") for r in rules]
+        return "\n".join(lines)
+
+    return mcp
+
+
+def run_mcp_server() -> None:
+    """Run MCP server. Use with: python -m llm_proxy.mcp_server"""
+    mcp = create_mcp_server()
+    mcp.run(transport="stdio")

@@ -1,0 +1,5 @@
+body: '[]'
+id: cart_empty
+status_code: 200
+url_pattern: /api/cart
+use_regex: false

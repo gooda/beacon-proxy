@@ -1,0 +1,27 @@
+# Mock 数据示例 - 单文件模式
+# 用于模拟登录失败、空购物车、用户列表等场景
+
+rules:
+  # 模拟登录接口返回 500
+  - id: login_500
+    url_pattern: /api/login
+    description: 模拟登录服务异常
+    status_code: 500
+    body: '{"code":500,"message":"Internal Server Error"}'
+    use_regex: false
+
+  # 模拟购物车为空
+  - id: cart_empty
+    url_pattern: /api/cart
+    description: 模拟空购物车
+    status_code: 200
+    body: '{"items":[],"total":0}'
+    use_regex: false
+
+  # 模拟用户列表返回空
+  - id: user_list_empty
+    url_pattern: /api/users
+    description: 模拟用户列表为空
+    status_code: 200
+    body: '{"users":[],"total":0}'
+    use_regex: false

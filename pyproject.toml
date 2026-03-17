@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "beacon-proxy"
+version = "0.1.0"
+description = "Proxy service for UI automation testing, supports CLI + MCP invocation"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "mitmproxy>=9.0",
+    "pydantic>=2.0",
+    "typer>=0.9",
+    "pyyaml>=6.0",
+    "uvicorn>=0.24",
+    "fastapi>=0.104",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.0"]
+
+[project.scripts]
+beacon-proxy = "llm_proxy.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llm_proxy"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/llm_proxy"]
