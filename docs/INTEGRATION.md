@@ -284,6 +284,7 @@ overrides: {} # 可选，对某规则的字段覆盖
 | 变量                          | 说明               | 默认值      |
 | ----------------------------- | ------------------ | ----------- |
 | LLM_PROXY_RULES               | 规则文件或目录路径 | rules.yaml  |
+| BEACON_PROXY_CONFDIR          | 证书存储目录       | ~/.mitmproxy |
 | BEACON_PROXY_DEVICE_ID_HEADER | 设备 ID 请求头名   | X-Device-ID |
 
 ---
@@ -303,29 +304,64 @@ LLM_PROXY_RULES=/path/to/rules beacon-proxy api --host 0.0.0.0 --port 8765
 
 ---
 
-## 7.1 证书安装（HTTPS 拦截）
+## 7.1 证书配置与安装（HTTPS 拦截）
 
-iOS/Android 等设备需安装 mitmproxy CA 证书后，HTTPS 流量才能正常通过代理。
+### 7.1.1 证书存储路径
 
-**HTTP 服务**：API 服务提供证书下载页面，设备配置代理后访问：
-
-```
-http://<API地址>:8765/certificate
-```
-
-**移动端访问**：需将 API 绑定到 `0.0.0.0`，以便同网段设备访问：
+Beacon Proxy 使用 mitmproxy 生成的 CA 证书进行 HTTPS 解密。证书默认存储在 `~/.mitmproxy`，可通过环境变量自定义：
 
 ```bash
-# 方式一：启动时指定
-beacon-proxy start --with-api --api-host 0.0.0.0
-
-# 方式二：单独启动 API
-beacon-proxy api --host 0.0.0.0
+# 自定义证书目录（代理与 API 均需设置）
+export BEACON_PROXY_CONFDIR=/path/to/certs
+beacon-proxy start --with-api
 ```
 
-设备在浏览器中访问 `http://<宿主机IP>:8765/certificate`，按页面指引下载并安装证书。
+证书文件：
+- `mitmproxy-ca-cert.cer`：iOS / 通用
+- `mitmproxy-ca-cert.pem`：Android / curl
 
-**环境变量**：若 mitmproxy 使用自定义配置目录，可设置 `BEACON_PROXY_CONFDIR` 指向该目录。
+### 7.1.2 证书生成
+
+证书在**首次启动代理**时由 mitmproxy 自动生成。若访问 `/certificate` 提示「证书尚未生成」，请先执行一次 `beacon-proxy start` 后再访问。
+
+### 7.1.3 设备配置代理
+
+被测设备需先配置 HTTP 代理指向 Beacon Proxy：
+
+| 平台 | 配置路径 |
+|------|----------|
+| iOS | 设置 → 无线局域网 → 当前网络 → 配置代理 → 手动 |
+| Android | 设置 → WLAN → 长按网络 → 修改网络 → 代理 |
+| macOS | 系统设置 → 网络 → 高级 → 代理 |
+| Windows | 设置 → 网络和 Internet → 代理 |
+
+填写：**服务器** = 代理所在机器 IP，**端口** = 8080。
+
+### 7.1.4 下载与安装证书
+
+**步骤 1**：确保 API 绑定 `0.0.0.0`，以便同网段设备访问：
+
+```bash
+beacon-proxy start --with-api --api-host 0.0.0.0
+```
+
+**步骤 2**：在设备浏览器中访问（设备需已配置代理）：
+
+```
+http://<代理服务器IP>:8765/certificate
+```
+
+**步骤 3**：按平台安装并信任证书：
+
+| 平台 | 安装步骤 |
+|------|----------|
+| **iOS** | 下载 .cer → 设置 → 已下载描述文件 → 安装 → **设置 → 通用 → 关于本机 → 证书信任设置 → 启用「mitmproxy」** |
+| **Android** | 下载 .pem → 设置 → 安全 → 安装证书 → 选择 CA 证书 |
+| **macOS** | 下载 .cer → 双击安装到钥匙串 → 钥匙串访问中找到 mitmproxy → 展开 → 双击证书 → 信任 → 始终信任 |
+
+**直接下载链接**（需设备已配置代理）：
+- iOS/通用：`http://<IP>:8765/certificate/download?format=cer`
+- Android：`http://<IP>:8765/certificate/download?format=pem`
 
 ---
 

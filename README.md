@@ -12,6 +12,24 @@ pip install -e .
 # MCP 支持（可选）: pip install "beacon-proxy[mcp]"
 ```
 
+## 打包与部署
+
+### tar 包（跨设备部署）
+
+```bash
+./scripts/package.sh
+# 生成 dist/beacon-proxy-0.1.0.tar.gz
+```
+
+部署到其他设备：
+
+```bash
+tar -xzf beacon-proxy-0.1.0.tar.gz && cd beacon-proxy-0.1.0
+pip install -r requirements.txt && pip install .
+./scripts/start.sh
+```
+
+
 ## 使用
 
 ### 快速启动
@@ -106,13 +124,7 @@ beacon-proxy start --with-api
 beacon-proxy api
 ```
 
-**证书安装**：HTTPS 拦截需在设备上安装 CA 证书。API 服务提供下载页：
-
-```
-http://<API地址>:8765/certificate
-```
-
-移动端访问时需 `--api-host 0.0.0.0` 或 `--host 0.0.0.0`。
+**证书配置**：HTTPS 拦截需在设备上安装 CA 证书。证书默认存于 `~/.mitmproxy`，可通过 `BEACON_PROXY_CONFDIR` 自定义。设备配置代理后访问 `http://<API地址>:8765/certificate` 下载；移动端需 `--api-host 0.0.0.0`。详见 [INTEGRATION.md 7.1 证书配置与安装](docs/INTEGRATION.md)。
 
 **API 示例：**
 
