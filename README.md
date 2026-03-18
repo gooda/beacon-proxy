@@ -13,6 +13,22 @@ pip install -e .
 # MCP 支持（可选）: pip install "beacon-proxy[mcp]"
 ```
 
+### Agent Skills（Cursor / Claude Code 等）
+
+在 AI 编程助手中安装 Beacon Proxy 技能，便于对话中配置代理、规则与激活：
+
+```bash
+# 从本仓库安装（需替换为实际仓库 URL）
+npx skills add https://github.com/your-org/mitmproxy-server
+# 或 GitLab
+npx skills add https://gitlab.com/your-org/mitmproxy-server
+
+# 仅安装 beacon-proxy 技能
+npx skills add https://github.com/your-org/mitmproxy-server --skill beacon-proxy
+```
+
+安装后，当对话涉及 proxy、mock API、请求拦截等时，AI 会自动应用该技能。
+
 ## 打包与部署
 
 ### tar 包（跨设备部署）
