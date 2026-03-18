@@ -47,6 +47,8 @@ def add_rule(
     status_code: Optional[int] = typer.Option(None, "--status", "-s", help="Override status code"),
     body: Optional[str] = typer.Option(None, "--body", "-b", help="Override response body"),
     regex: bool = typer.Option(False, "--regex", "-r", help="url_pattern is regex"),
+    upstream_host: Optional[str] = typer.Option(None, "--upstream-host", help="Rewrite to this host (A域名->B域名)"),
+    upstream_port: Optional[int] = typer.Option(None, "--upstream-port", help="Target port (default 443/80)"),
     device_id: Optional[str] = typer.Option(None, "--device-id", "-d", help="Bind to device (reuse mode)"),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file or directory path"),
 ) -> None:
@@ -61,10 +63,38 @@ def add_rule(
         status_code=status_code,
         body=body,
         use_regex=regex,
+        upstream_host=upstream_host,
+        upstream_port=upstream_port,
     )
     manager.add_rule(rule, device_id)
     target = f" (device={device_id})" if device_id else ""
     typer.echo(f"Added rule {rid}: {url_pattern}{target}")
+
+
+@app.command("add-rewrite")
+def add_rewrite(
+    from_host: str = typer.Argument(..., help="源域名（A），如 api.prod.example.com"),
+    to_host: str = typer.Argument(..., help="目标域名（B），如 api.staging.example.com"),
+    rule_id: Optional[str] = typer.Option(None, "--id", "-i", help="Rule id (default: auto)"),
+    port: int = typer.Option(443, "--port", "-p", help="目标端口"),
+    device_id: Optional[str] = typer.Option(None, "--device-id", "-d", help="绑定到设备"),
+    rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file or directory path"),
+) -> None:
+    """添加域名重写规则：将 A 域名的请求代理转发到 B 域名。"""
+    manager = _get_manager(rules_file)
+    rules = manager.get_intercept_rules(device_id)
+    rid = rule_id or f"rewrite_{len(rules) + 1}"
+    rule = InterceptRule(
+        id=rid,
+        url_pattern=from_host,
+        description=f"{from_host} -> {to_host}",
+        upstream_host=to_host,
+        upstream_port=port,
+        use_regex=False,
+    )
+    manager.add_rule(rule, device_id)
+    target = f" (device={device_id})" if device_id else ""
+    typer.echo(f"Added rewrite {rid}: {from_host} -> {to_host}:{port}{target}")
 
 
 @app.command()
@@ -125,7 +155,8 @@ def list_definitions(
     typer.echo("Definitions:")
     for r in rules:
         desc = f" ({r.description})" if r.description else ""
-        typer.echo(f"  {r.id}: {r.url_pattern} -> status={r.status_code}, body={r.body is not None}{desc}")
+        rewrite = f" -> {r.upstream_host}" if r.upstream_host else ""
+        typer.echo(f"  {r.id}: {r.url_pattern}{rewrite} -> status={r.status_code}, body={r.body is not None}{desc}")
 
 
 @app.command()
@@ -143,7 +174,8 @@ def list_rules(
     typer.echo(f"Rules{header}:")
     for r in rules:
         desc = f" ({r.description})" if r.description else ""
-        typer.echo(f"  {r.id}: {r.url_pattern} -> status={r.status_code}, body={r.body is not None}{desc}")
+        rewrite = f" -> {r.upstream_host}" if r.upstream_host else ""
+        typer.echo(f"  {r.id}: {r.url_pattern}{rewrite} -> status={r.status_code}, body={r.body is not None}{desc}")
 
 
 @app.command()

@@ -14,6 +14,9 @@ class InterceptRule(BaseModel):
     status_code: Optional[int] = Field(default=None, description="Override response status code")
     body: Optional[Union[str, bytes]] = Field(default=None, description="Override response body")
     use_regex: bool = Field(default=False, description="Whether url_pattern is regex")
+    # 域名重写：将匹配的请求转发到指定 host
+    upstream_host: Optional[str] = Field(default=None, description="Rewrite request to this host (A域名->B域名)")
+    upstream_port: Optional[int] = Field(default=None, description="Target port, default 443 for https else 80")
 
 
 class ProxyConfig(BaseModel):

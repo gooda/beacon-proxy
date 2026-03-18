@@ -33,9 +33,22 @@ class LLMProxyAddon:
         return None
 
     def request(self, flow: "HTTPFlow") -> None:
-        """Record request for later query."""
+        """域名重写（upstream_host）与请求记录。"""
+        url = flow.request.pretty_url
+        client_ip = self._get_client_ip(flow)
+        rules = self.manager.get_intercept_rules_for_client(client_ip) if client_ip else []
+        if not rules:
+            device_id = self._get_device_id(flow)
+            rules = self.manager.get_intercept_rules(device_id)
+
+        for rule in rules:
+            if rule.upstream_host and self._match_url(url, rule):
+                flow.request.host = rule.upstream_host
+                flow.request.port = rule.upstream_port or (443 if flow.request.scheme == "https" else 80)
+                flow.request.headers["Host"] = rule.upstream_host
+                break
+
         try:
-            url = flow.request.pretty_url
             self.manager.record_request(
                 {
                     "url": url,

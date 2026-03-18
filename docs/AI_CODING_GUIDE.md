@@ -148,6 +148,7 @@ curl -X POST http://127.0.0.1:8765/api/activate \
 | 工具 | 说明 | 典型用法 |
 |------|------|----------|
 | `generate_from_requirement` | 根据需求自动生成规则并激活 | 输入「登录失败」「购物车空」等自然语言，一步完成 |
+| `add_domain_rewrite` | 添加域名重写规则 | 将 A 域名请求代理到 B 域名 |
 | `add_rule` | 添加拦截规则 | 模拟接口异常、空数据 |
 | `remove_rule` | 删除规则 | 清理临时 mock |
 | `list_rules` | 列出规则 | 确认当前 mock 状态 |
@@ -163,6 +164,7 @@ curl -X POST http://127.0.0.1:8765/api/activate \
 在对话中可这样引导 AI 使用代理：
 
 - 「登录失败，设备 192.168.1.101」（调用 `generate_from_requirement` 一步完成）
+- 「将 api.prod.example.com 代理到 api.staging.example.com」（调用 `add_domain_rewrite`）
 - 「用 Beacon Proxy mock 一下 /api/user 返回 401」
 - 「帮我添加一个规则：/api/orders 返回空数组，状态码 200」
 - 「设备 192.168.1.101 需要应用 login_500 规则，请激活」

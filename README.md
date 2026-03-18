@@ -51,6 +51,9 @@ beacon-proxy start
 # 添加拦截规则
 beacon-proxy add-rule "/api/login" --status 500 --body '{"error":"server_error"}'
 
+# 添加域名重写（A 域名 -> B 域名）
+beacon-proxy add-rewrite api.prod.example.com api.staging.example.com -d device_A
+
 # 列出规则
 beacon-proxy list-rules
 
@@ -64,7 +67,7 @@ beacon-proxy remove-rule rule_1
 beacon-proxy mcp
 ```
 
-需先安装 `pip install mcp`。在 Cursor 等支持 MCP 的客户端中配置该服务器，大模型可调用 `add_rule`、`remove_rule`、`list_rules` 等工具。
+需先安装 `pip install mcp`。在 Cursor 等支持 MCP 的客户端中配置该服务器，大模型可调用 `add_rule`、`add_domain_rewrite`、`remove_rule`、`list_rules` 等工具。
 
 ### 规则文件
 

@@ -1,0 +1,7 @@
+# 示例：将 api.prod.example.com 代理到 api.staging.example.com
+id: api_rewrite
+url_pattern: api.prod.example.com
+description: 线上 API 代理到预发
+upstream_host: api.staging.example.com
+upstream_port: 443
+use_regex: false

@@ -33,9 +33,11 @@ def create_mcp_server() -> "FastMCP":
         status_code: Optional[int] = None,
         body: Optional[str] = None,
         use_regex: bool = False,
+        upstream_host: Optional[str] = None,
+        upstream_port: Optional[int] = None,
         device_id: Optional[str] = None,
     ) -> str:
-        """Add an intercept rule. url_pattern: URL to match. description: rule description. status_code: override response code. body: override response body. device_id: for per-device rules."""
+        """Add an intercept rule. url_pattern: URL to match. upstream_host: rewrite to this host (A域名->B域名). status_code, body: response override. device_id: for per-device rules."""
         manager = _get_manager()
         rules = manager.get_intercept_rules(device_id)
         rid = rule_id or f"rule_{len(rules) + 1}"
@@ -46,10 +48,36 @@ def create_mcp_server() -> "FastMCP":
             status_code=status_code,
             body=body,
             use_regex=use_regex,
+            upstream_host=upstream_host,
+            upstream_port=upstream_port,
         )
         manager.add_rule(rule, device_id)
         target = f" (device={device_id})" if device_id else ""
         return f"Added rule {rid}: {url_pattern}{target}"
+
+    @mcp.tool()
+    def add_domain_rewrite(
+        from_host: str,
+        to_host: str,
+        rule_id: Optional[str] = None,
+        port: int = 443,
+        device_id: Optional[str] = None,
+    ) -> str:
+        """添加域名重写规则：将 A 域名的请求代理转发到 B 域名。from_host: 源域名。to_host: 目标域名。port: 目标端口。device_id: 绑定到设备。"""
+        manager = _get_manager()
+        rules = manager.get_intercept_rules(device_id)
+        rid = rule_id or f"rewrite_{len(rules) + 1}"
+        rule = InterceptRule(
+            id=rid,
+            url_pattern=from_host,
+            description=f"{from_host} -> {to_host}",
+            upstream_host=to_host,
+            upstream_port=port,
+            use_regex=False,
+        )
+        manager.add_rule(rule, device_id)
+        target = f" (device={device_id})" if device_id else ""
+        return f"Added rewrite {rid}: {from_host} -> {to_host}:{port}{target}"
 
     @mcp.tool()
     def remove_rule(rule_id: str, device_id: Optional[str] = None) -> str:
@@ -82,7 +110,10 @@ def create_mcp_server() -> "FastMCP":
         rules = manager.list_definitions()
         if not rules:
             return "No definitions"
-        lines = [f"  {r.id}: {r.url_pattern} -> status={r.status_code}" + (f" ({r.description})" if r.description else "") for r in rules]
+        lines = []
+        for r in rules:
+            rewrite = f" -> {r.upstream_host}" if r.upstream_host else ""
+            lines.append(f"  {r.id}: {r.url_pattern}{rewrite} -> status={r.status_code}" + (f" ({r.description})" if r.description else ""))
         return "\n".join(lines)
 
     @mcp.tool()
@@ -117,7 +148,10 @@ def create_mcp_server() -> "FastMCP":
         rules = manager.get_intercept_rules(device_id)
         if not rules:
             return "No rules"
-        lines = [f"  {r.id}: {r.url_pattern} -> status={r.status_code}, body={r.body is not None}" + (f" ({r.description})" if r.description else "") for r in rules]
+        lines = []
+        for r in rules:
+            rewrite = f" -> {r.upstream_host}" if r.upstream_host else ""
+            lines.append(f"  {r.id}: {r.url_pattern}{rewrite} -> status={r.status_code}, body={r.body is not None}" + (f" ({r.description})" if r.description else ""))
         return "\n".join(lines)
 
     @mcp.tool()

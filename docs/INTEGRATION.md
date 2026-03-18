@@ -262,13 +262,53 @@ body: '{"code":500,"message":"Internal Server Error"}'
 use_regex: false
 ```
 
-| 字段        | 说明                                    |
-| ----------- | --------------------------------------- |
-| url_pattern | URL 子串匹配，或正则（use_regex: true） |
-| status_code | 改写响应状态码                          |
-| body        | 改写响应体（JSON 字符串）               |
+| 字段         | 说明                                    |
+| ------------ | --------------------------------------- |
+| url_pattern  | URL 子串匹配，或正则（use_regex: true） |
+| status_code  | 改写响应状态码                          |
+| body         | 改写响应体（JSON 字符串）               |
+| upstream_host| 域名重写：将匹配请求转发到该 host       |
+| upstream_port| 目标端口（默认 443/80）                 |
 
-### 5.3 设备配置格式
+### 5.3 域名重写（A 域名代理成 B 域名）
+
+将线上接口域名 A 的请求转发到测试/预发域名 B。
+
+**CLI 专用命令**（推荐）：
+
+```bash
+# 添加域名重写：api.prod.example.com -> api.staging.example.com
+beacon-proxy add-rewrite api.prod.example.com api.staging.example.com --device-id device_A
+
+# 指定端口
+beacon-proxy add-rewrite api.prod.example.com api.staging.example.com --port 443 -d device_A
+```
+
+**通用 add-rule**：
+
+```bash
+beacon-proxy add-rule "api.prod.example.com" --id api_rewrite \
+  --upstream-host api.staging.example.com --upstream-port 443 \
+  --device-id device_A
+```
+
+**YAML 定义**：
+
+```yaml
+# rules/definitions/api_rewrite.yaml
+id: api_rewrite
+url_pattern: api.prod.example.com
+description: 线上 API 代理到预发
+upstream_host: api.staging.example.com
+upstream_port: 443
+use_regex: false
+```
+
+**MCP 工具**：`add_domain_rewrite(from_host, to_host, port=443, device_id=None)`
+
+设备绑定该规则后，访问 `https://api.prod.example.com/xxx` 的请求会被代理转发到 `https://api.staging.example.com/xxx`。
+
+### 5.4 设备配置格式
 
 ```yaml
 rule_ids:
@@ -519,8 +559,9 @@ async function deactivateByIp(clientIp) {
 
 ```bash
 beacon-proxy add-rule "/api/login" --id login_500 --status 500 --device-id device_A
+beacon-proxy add-rewrite api.prod.example.com api.staging.example.com -d device_A
 beacon-proxy list-rules --device-id device_A
 beacon-proxy start --with-api --rules rules
 ```
 
-**MCP**：供 Cursor 等 AI 客户端调用，支持 `generate_from_requirement`（根据需求自动生成并激活）、`add_rule`、`activate`、`deactivate` 等工具，用于交互式调试。
+**MCP**：供 Cursor 等 AI 客户端调用，支持 `generate_from_requirement`、`add_domain_rewrite`（域名重写）、`add_rule`、`activate`、`deactivate` 等工具，用于交互式调试。
