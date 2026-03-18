@@ -125,6 +125,10 @@ class FileBasedManager:
             return _pydantic_validate(InterceptRule, data)
         return None
 
+    def get_definition(self, rule_id: str) -> Optional[InterceptRule]:
+        """Load rule definition by id."""
+        return self._load_definition(rule_id)
+
     def _save_definition(self, rule: InterceptRule) -> None:
         path = self._definition_path(rule.id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -338,6 +342,37 @@ class FileBasedManager:
                 except Exception:
                     pass
         return result
+
+    def list_scenarios(self) -> List[str]:
+        """List scenario ids from scenarios directory (reuse mode only)."""
+        if not self._reuse_mode:
+            return []
+        scenarios_dir = self._scenarios_dir()
+        if not scenarios_dir.exists():
+            return []
+        return sorted(p.stem for p in scenarios_dir.glob("*.yaml"))
+
+    def create_scenario(self, scenario_id: str) -> bool:
+        """Create empty scenario config. Returns True if created."""
+        if not self._reuse_mode:
+            return False
+        path = self._scenario_path(scenario_id)
+        if path.exists():
+            return False
+        self._save_scenario_config(scenario_id, ScenarioConfigSchema())
+        return True
+
+    def update_rule(self, rule_id: str, updates: Dict[str, Any]) -> Optional[InterceptRule]:
+        """Update a rule definition. Returns updated rule or None if not found. id cannot be changed."""
+        existing = self._load_definition(rule_id)
+        if not existing:
+            return None
+        allowed = {"url_pattern", "description", "status_code", "body", "use_regex", "upstream_host", "upstream_port"}
+        d = _pydantic_dump(existing)
+        d.update({k: v for k, v in updates.items() if k in allowed})
+        updated = _pydantic_validate(InterceptRule, d)
+        self._save_definition(updated)
+        return updated
 
     def record_request(self, request: dict) -> None:
         self._state.recorded_requests.append(request)

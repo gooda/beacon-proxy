@@ -3,23 +3,39 @@ rules:
   description: null
   id: rule_1
   status_code: 500
+  upstream_host: null
+  upstream_port: null
   url_pattern: /api/test
   use_regex: false
 - body: null
   description: null
   id: r1
   status_code: 500
+  upstream_host: null
+  upstream_port: null
   url_pattern: /api/test
   use_regex: false
 - body: null
   description: null
   id: rule_3
   status_code: 404
+  upstream_host: null
+  upstream_port: null
   url_pattern: /api/test
   use_regex: false
 - body: null
   description: 模拟登录失败
   id: rule_4
   status_code: 500
+  upstream_host: null
+  upstream_port: null
   url_pattern: /api/test
+  use_regex: false
+- body: null
+  description: aaa
+  id: abc
+  status_code: 404
+  upstream_host: null
+  upstream_port: null
+  url_pattern: /api
   use_regex: false

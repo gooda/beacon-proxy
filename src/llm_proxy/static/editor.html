@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Beacon Proxy 规则编辑器</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Source+Sans+3:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --space-xs: 4px; --space-sm: 8px; --space-md: 12px; --space-lg: 16px; --space-xl: 24px; --space-2xl: 32px;
+      --radius-sm: 6px; --radius-md: 8px; --radius-lg: 10px;
+      --font-ui: "Source Sans 3", -apple-system, sans-serif;
+      --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+      --bg: #0f1419;
+      --bg-panel: #151b23;
+      --bg-hover: #1c2430;
+      --border: #2a3544;
+      --text: #e6edf3;
+      --text-muted: #8b9eb0;
+      --accent: #58a6ff;
+      --accent-dim: #388bfd;
+      --accent-muted: #1f6feb;
+      --danger: #f85149;
+      --danger-dim: #da3633;
+      --success: #3fb950;
+      --warning: #e3b341;
+      --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: 0.01ms !important; } }
+    html { font-size: 15px; height: 100%; overflow: hidden; }
+    body {
+      margin: 0; padding: 0;
+      font-family: var(--font-ui); font-weight: 400; line-height: 1.5;
+      color: var(--text); height: 100vh;
+      background: var(--bg);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+    .container {
+      flex: 1; display: flex; flex-direction: column;
+      min-height: 0; overflow: hidden;
+      background: var(--bg-panel); border: none;
+    }
+    .header {
+      flex-shrink: 0;
+      display: flex; justify-content: space-between; align-items: center;
+      padding: var(--space-lg) var(--space-xl);
+      background: var(--bg-panel); border-bottom: 1px solid var(--border);
+    }
+    .header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; color: var(--text); }
+    .header .btns { display: flex; gap: var(--space-sm); }
+    .btn {
+      padding: var(--space-sm) var(--space-md);
+      font-family: var(--font-mono); font-size: 0.875rem; font-weight: 500;
+      border: 1px solid var(--border); cursor: pointer;
+      transition: all 0.15s var(--ease-out);
+    }
+    .btn:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+    .btn-primary { background: transparent; color: var(--accent); border-color: var(--accent-muted); }
+    .btn-primary:hover { background: rgba(88, 166, 255, 0.12); border-color: var(--accent); }
+    .btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--border); }
+    .btn-ghost:hover { background: var(--bg-hover); color: var(--accent); border-color: var(--accent-muted); }
+    .btn-danger { background: transparent; color: var(--danger); border-color: var(--danger-dim); }
+    .btn-danger:hover { background: rgba(248, 81, 73, 0.15); border-color: var(--danger); }
+    .main {
+      flex: 1; display: grid; grid-template-columns: 200px 1fr;
+      min-height: 0;
+      transition: grid-template-columns 0.2s var(--ease-out);
+    }
+    .main.edit-open { grid-template-columns: 200px 1fr 340px; }
+    @media (max-width: 900px) {
+      .main { grid-template-columns: 1fr; }
+      .main.edit-open { grid-template-columns: 1fr; }
+    }
+    .panel {
+      padding: var(--space-lg); overflow-y: auto;
+      border-right: 1px solid var(--border);
+    }
+    .panel-edit { display: none; border-left: 1px solid var(--border); overflow-y: auto; }
+    .main.edit-open .panel-edit { display: block; }
+    .panel:last-of-type { border-right: none; }
+    @media (max-width: 900px) {
+      .panel { border-right: none; border-left: none; border-bottom: 1px solid var(--border); }
+      .panel:last-of-type { border-bottom: none; }
+    }
+    .panel h3 {
+      margin: 0 0 var(--space-md); font-size: 0.75rem; font-weight: 600;
+      color: var(--text-muted);
+    }
+    .scenario-item {
+      padding: var(--space-sm) var(--space-md); margin: var(--space-xs) 0;
+      font-size: 0.9375rem; border-left: 2px solid transparent;
+      cursor: pointer; transition: all 0.15s var(--ease-out);
+    }
+    .scenario-item:hover { background: var(--bg-hover); color: var(--accent); }
+    .scenario-item.active {
+      background: var(--bg-hover); color: var(--accent);
+      border-left-color: var(--accent);
+    }
+    .scenario-item:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+    .rule-row {
+      display: flex; align-items: center; gap: var(--space-md);
+      padding: var(--space-md); margin: var(--space-sm) 0;
+      background: var(--bg); border: 1px solid var(--border);
+      border-left: 2px solid var(--accent-muted);
+      transition: all 0.15s var(--ease-out);
+      cursor: pointer;
+    }
+    .rule-row:hover { background: var(--bg-hover); border-left-color: var(--accent); }
+    .rule-row .id { font-family: var(--font-mono); font-size: 0.875rem; font-weight: 500; min-width: 110px; color: var(--accent); }
+    .rule-row .pattern {
+      flex: 1; font-size: 0.875rem; color: var(--text-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .rule-row .actions { display: flex; gap: var(--space-xs); flex-shrink: 0; }
+    .rule-row .actions .btn { padding: var(--space-xs) var(--space-sm); font-size: 0.8125rem; }
+    .form-group { margin-bottom: var(--space-md); }
+    .form-group label {
+      display: block; margin-bottom: var(--space-xs);
+      font-size: 0.8125rem; font-weight: 500; color: var(--text-muted);
+    }
+    .form-group input, .form-group textarea {
+      width: 100%; padding: var(--space-sm) var(--space-md);
+      font-family: var(--font-mono); font-size: 0.9375rem;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border);
+      transition: border-color 0.15s var(--ease-out);
+    }
+    .form-group input::placeholder, .form-group textarea::placeholder { color: var(--text-muted); opacity: 0.8; }
+    .form-group input:focus, .form-group textarea:focus {
+      outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent);
+    }
+    .form-group textarea { min-height: 88px; resize: vertical; font-family: var(--font-mono); font-size: 0.875rem; }
+    .form-tabs { display: flex; gap: var(--space-xs); margin-bottom: var(--space-lg); }
+    .form-tabs button {
+      padding: var(--space-sm) var(--space-md); font-family: var(--font-mono); font-size: 0.875rem;
+      background: transparent; color: var(--text-muted); border: 1px solid var(--border);
+      cursor: pointer; transition: all 0.15s var(--ease-out);
+    }
+    .form-tabs button:hover { color: var(--accent); border-color: var(--accent-muted); }
+    .form-tabs button.active { background: var(--bg-hover); color: var(--accent); border-color: var(--accent); }
+    .form-actions { margin-top: var(--space-xl); display: flex; gap: var(--space-sm); }
+    .activation-list { margin-top: var(--space-md); }
+    .activation-item {
+      display: flex; align-items: center; justify-content: space-between; gap: var(--space-md);
+      padding: var(--space-md); margin: var(--space-sm) 0;
+      background: var(--bg); border: 1px solid var(--border);
+      border-left: 2px solid var(--warning);
+      font-size: 0.9375rem;
+    }
+    .activation-item .ip-scenario { font-family: var(--font-mono); font-size: 0.875rem; }
+    .footer {
+      flex-shrink: 0;
+      padding: var(--space-lg) var(--space-xl);
+      border-top: 1px solid var(--border);
+      background: var(--bg-panel);
+    }
+    .footer h3 { margin: 0 0 var(--space-md); font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
+    .footer h3::before { content: "[ "; }
+    .footer h3::after { content: " ]"; }
+    .msg {
+      padding: var(--space-md); margin: var(--space-md) 0;
+      font-size: 0.875rem; border-radius: var(--radius-sm);
+      animation: fadeIn 0.2s var(--ease-out);
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    .msg.err { background: rgba(248, 81, 73, 0.12); color: #f85149; border: 1px solid var(--danger-dim); }
+    .msg.ok { background: rgba(63, 185, 80, 0.12); color: var(--success); border: 1px solid var(--success); }
+    .empty {
+      padding: var(--space-2xl); text-align: left;
+      font-size: 0.9375rem; color: var(--text-muted); line-height: 1.6;
+    }
+    .empty strong { color: var(--text); font-weight: 500; }
+    .btn-add {
+      width: 100%; margin-top: var(--space-md); padding: var(--space-md);
+      font-family: var(--font-mono); font-size: 0.9375rem;
+      background: transparent; color: var(--text-muted);
+      border: 1px dashed var(--border); cursor: pointer;
+      transition: all 0.15s var(--ease-out);
+    }
+    .btn-add:hover { border-color: var(--accent); color: var(--accent); background: var(--bg-hover); }
+    .modal {
+      display: none; position: fixed; inset: 0; z-index: 100;
+      align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.8); animation: fadeIn 0.2s var(--ease-out);
+    }
+    .modal.show { display: flex; }
+    .modal-content {
+      background: var(--bg-panel); padding: var(--space-xl);
+      border: 1px solid var(--border); min-width: 360px; max-width: 90vw;
+      box-shadow: 0 0 60px rgba(51, 255, 51, 0.1);
+    }
+    .modal-content h4 { margin: 0 0 var(--space-lg); font-size: 1.125rem; font-weight: 600; }
+    .modal-content .form-actions { margin-top: var(--space-lg); }
+    .loading { opacity: 0.6; pointer-events: none; }
+    .loading::after {
+      content: ""; position: absolute; inset: 0;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2333ff33' stroke-width='2'%3E%3Cpath d='M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83'/%3E%3C/svg%3E") center/24px no-repeat;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    a.btn { display: inline-block; color: inherit; }
+    a.btn:hover { text-decoration: none; }
+    .empty code { font-family: var(--font-mono); font-size: 0.875em; background: var(--bg-hover); padding: 2px 6px; border: 1px solid var(--border); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Beacon Proxy 规则编辑器</h1>
+      <div class="btns">
+        <button class="btn btn-ghost" onclick="refresh()">刷新</button>
+        <a href="/certificate" class="btn btn-ghost">证书</a>
+      </div>
+    </div>
+    <div class="main">
+      <div class="panel">
+        <h3>场景</h3>
+        <div id="scenario-list"></div>
+        <button class="btn-add" onclick="showNewScenarioModal()">+ 新建场景</button>
+      </div>
+      <div class="panel">
+        <h3>规则 <span id="scenario-label"></span></h3>
+        <div id="rule-list"></div>
+        <button class="btn-add" onclick="startAddRule()">+ 添加规则</button>
+      </div>
+      <div id="panel-edit" class="panel panel-edit">
+        <h3>编辑</h3>
+        <div id="form-msg"></div>
+        <div class="form-tabs">
+          <button id="tab-mock" class="active" onclick="setFormMode('mock')">Mock 响应</button>
+          <button id="tab-rewrite" onclick="setFormMode('rewrite')">域名重写</button>
+        </div>
+        <div id="rule-form">
+          <div class="form-group">
+            <label>规则 ID</label>
+            <input id="rule-id" placeholder="留空自动生成" />
+          </div>
+          <div class="form-group">
+            <label>URL 匹配 / 源域名</label>
+            <input id="rule-pattern" placeholder="/api/login 或 api.prod.example.com" required />
+          </div>
+          <div class="form-group" id="grp-desc">
+            <label>描述</label>
+            <input id="rule-desc" placeholder="可选" />
+          </div>
+          <div class="form-group" id="grp-mock">
+            <label>状态码</label>
+            <input id="rule-status" type="number" placeholder="500" />
+          </div>
+          <div class="form-group" id="grp-body">
+            <label>响应体 (JSON)</label>
+            <textarea id="rule-body" placeholder='{"error":"server_error"}'></textarea>
+          </div>
+          <div class="form-group" id="grp-rewrite" style="display:none;">
+            <label>目标域名</label>
+            <input id="rule-upstream" placeholder="api.staging.example.com" />
+          </div>
+          <div class="form-group" id="grp-port" style="display:none;">
+            <label>目标端口</label>
+            <input id="rule-port" type="number" placeholder="443" />
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" onclick="saveRule()">保存</button>
+            <button class="btn btn-ghost" onclick="cancelEdit()">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="footer">
+      <h3>激活状态</h3>
+      <div id="activation-list" class="activation-list"></div>
+      <button class="btn-add" onclick="showActivateModal()">+ 激活场景</button>
+    </div>
+  </div>
+
+  <div id="modal-scenario" class="modal" onclick="if(event.target===this)closeModal('modal-scenario')">
+    <div class="modal-content">
+      <h4>新建场景</h4>
+      <div class="form-group">
+        <label>场景 ID</label>
+        <input id="new-scenario-id" placeholder="scenario_C" />
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="createScenario()">创建</button>
+        <button class="btn btn-ghost" onclick="closeModal('modal-scenario')">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-activate" class="modal" onclick="if(event.target===this)closeModal('modal-activate')">
+    <div class="modal-content">
+      <h4>激活场景</h4>
+      <div class="form-group">
+        <label>场景 ID</label>
+        <input id="activate-scenario" placeholder="scenario_A" />
+      </div>
+      <div class="form-group">
+        <label>客户端 IP</label>
+        <input id="activate-ip" placeholder="192.168.1.101" />
+      </div>
+      <div class="form-group">
+        <label>规则 ID 覆盖（可选，逗号分隔）</label>
+        <input id="activate-rule-ids" placeholder="login_500, cart_empty" />
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="doActivate()">激活</button>
+        <button class="btn btn-ghost" onclick="closeModal('modal-activate')">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '';
+    let currentScenario = null;
+    let editingRuleId = null;
+    let formMode = 'mock';
+
+    function formatApiError(err) {
+      if (Array.isArray(err.detail)) {
+        return err.detail.map(e => (e.msg || e.message || JSON.stringify(e))).join('; ');
+      }
+      return err.detail || err.message || '请求失败';
+    }
+
+    async function fetchJson(url, opts = {}) {
+      const headers = { ...opts.headers };
+      if (opts.body || opts.method === 'POST' || opts.method === 'PUT') {
+        headers['Content-Type'] = 'application/json';
+      }
+      const r = await fetch(API + url, { ...opts, headers });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({ detail: r.statusText }));
+        throw new Error(formatApiError(err));
+      }
+      if (r.status === 204) return null;
+      return r.json().catch(() => null);
+    }
+
+    async function loadScenarios() {
+      try {
+        const list = await fetchJson('/api/scenarios');
+        const el = document.getElementById('scenario-list');
+        if (list.length === 0) {
+          el.innerHTML = '<div class="empty"><strong>暂无场景</strong><br>点击下方按钮新建，或确保 <code>LLM_PROXY_RULES</code> 指向 rules 目录</div>';
+          return;
+        }
+        el.innerHTML = list.map(s => {
+          const sAttr = escapeAttr(s);
+          return `<div class="scenario-item ${s === currentScenario ? 'active' : ''}" data-scenario="${sAttr}" onclick="selectScenario(this.dataset.scenario)" tabindex="0" role="button">${escapeHtml(s)}</div>`;
+        }).join('');
+      } catch (e) {
+        document.getElementById('scenario-list').innerHTML = '<div class="msg err">' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    async function loadRules() {
+      const el = document.getElementById('rule-list');
+      if (!currentScenario) {
+        el.innerHTML = '<div class="empty">选择左侧场景以查看规则</div>';
+        return;
+      }
+      try {
+        const rules = await fetchJson('/api/rules?scenario_id=' + encodeURIComponent(currentScenario));
+        document.getElementById('scenario-label').textContent = '(' + currentScenario + ')';
+        if (rules.length === 0) {
+          el.innerHTML = '<div class="empty"><strong>暂无规则</strong><br>点击下方按钮添加 Mock 或域名重写规则</div>';
+          return;
+        }
+        el.innerHTML = rules.map(r => {
+          const id = escapeAttr(r.id);
+          return `<div class="rule-row" data-rule-id="${id}" onclick="editRule(this.dataset.ruleId)" onkeydown="if(event.key==='Enter')editRule(this.dataset.ruleId)" tabindex="0" role="button">
+            <span class="id">${escapeHtml(r.id)}</span>
+            <span class="pattern">${escapeHtml(r.url_pattern)}${r.upstream_host ? ' → ' + escapeHtml(r.upstream_host) : ''}</span>
+            <div class="actions" onclick="event.stopPropagation()">
+              <button class="btn btn-ghost" data-rule-id="${id}" onclick="editRule(this.dataset.ruleId)">编辑</button>
+              <button class="btn btn-danger" data-rule-id="${id}" onclick="deleteRule(this.dataset.ruleId)">删除</button>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        el.innerHTML = '<div class="msg err">' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    async function loadActivations() {
+      try {
+        const acts = await fetchJson('/api/activate');
+        const ips = acts.ip_to_scenario || {};
+        const el = document.getElementById('activation-list');
+        if (Object.keys(ips).length === 0) {
+          el.innerHTML = '<div class="empty"><strong>暂无激活</strong><br>测试前调用 API 或点击下方按钮，将 IP 与场景绑定</div>';
+          return;
+        }
+        el.innerHTML = Object.entries(ips).map(([ip, sid]) => {
+          const ipAttr = escapeAttr(ip);
+          return `<div class="activation-item">
+            <span class="ip-scenario">${escapeHtml(ip)} → ${escapeHtml(sid)}</span>
+            <button class="btn btn-danger" data-ip="${ipAttr}" onclick="deactivateIp(this.dataset.ip)">取消</button>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        document.getElementById('activation-list').innerHTML = '<div class="msg err">' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+    function escapeAttr(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function selectScenario(s) {
+      currentScenario = s;
+      loadScenarios();
+      loadRules();
+    }
+
+    function setFormMode(mode) {
+      formMode = mode;
+      document.getElementById('tab-mock').classList.toggle('active', mode === 'mock');
+      document.getElementById('tab-rewrite').classList.toggle('active', mode === 'rewrite');
+      document.getElementById('grp-mock').style.display = mode === 'mock' ? 'block' : 'none';
+      document.getElementById('grp-body').style.display = mode === 'mock' ? 'block' : 'none';
+      document.getElementById('grp-rewrite').style.display = mode === 'rewrite' ? 'block' : 'none';
+      document.getElementById('grp-port').style.display = mode === 'rewrite' ? 'block' : 'none';
+    }
+
+    function showEditPanel() {
+      document.querySelector('.main').classList.add('edit-open');
+    }
+    function hideEditPanel() {
+      document.querySelector('.main').classList.remove('edit-open');
+    }
+
+    function startAddRule() {
+      if (!currentScenario) {
+        showMsg('请先选择场景', true);
+        return;
+      }
+      editingRuleId = null;
+      document.getElementById('rule-id').value = '';
+      document.getElementById('rule-pattern').value = '';
+      document.getElementById('rule-desc').value = '';
+      document.getElementById('rule-status').value = '';
+      document.getElementById('rule-body').value = '';
+      document.getElementById('rule-upstream').value = '';
+      document.getElementById('rule-port').value = '443';
+      document.getElementById('form-msg').innerHTML = '';
+      setFormMode('mock');
+      showEditPanel();
+    }
+
+    async function editRule(id) {
+      try {
+        const r = await fetchJson('/api/rules/' + encodeURIComponent(id));
+        editingRuleId = id;
+        document.getElementById('rule-id').value = r.id;
+        document.getElementById('rule-pattern').value = r.url_pattern;
+        document.getElementById('rule-desc').value = r.description || '';
+        document.getElementById('rule-status').value = r.status_code || '';
+        document.getElementById('rule-body').value = (typeof r.body === 'string' ? r.body : '') || '';
+        document.getElementById('rule-upstream').value = r.upstream_host || '';
+        document.getElementById('rule-port').value = r.upstream_port || 443;
+        setFormMode(r.upstream_host ? 'rewrite' : 'mock');
+        document.getElementById('form-msg').innerHTML = '';
+        showEditPanel();
+      } catch (e) {
+        showMsg(e.message, true);
+      }
+    }
+
+    async function saveRule() {
+      const id = document.getElementById('rule-id').value.trim() || undefined;
+      const url_pattern = document.getElementById('rule-pattern').value.trim();
+      if (!url_pattern) {
+        showMsg('URL 匹配不能为空', true);
+        return;
+      }
+      const body = {
+        url_pattern,
+        description: document.getElementById('rule-desc').value.trim() || null,
+        scenario_id: currentScenario || null,
+      };
+      if (id) body.id = id;
+      if (formMode === 'mock') {
+        const sc = document.getElementById('rule-status').value;
+        body.status_code = sc ? parseInt(sc, 10) : null;
+        body.body = document.getElementById('rule-body').value.trim() || null;
+      } else {
+        body.upstream_host = document.getElementById('rule-upstream').value.trim() || null;
+        body.upstream_port = parseInt(document.getElementById('rule-port').value, 10) || 443;
+      }
+      try {
+        if (editingRuleId) {
+          const updateBody = { url_pattern: body.url_pattern, description: body.description };
+          if (formMode === 'mock') {
+            updateBody.status_code = body.status_code;
+            updateBody.body = body.body;
+          } else {
+            updateBody.upstream_host = body.upstream_host;
+            updateBody.upstream_port = body.upstream_port;
+          }
+          const r = await fetch(API + '/api/rules/' + encodeURIComponent(editingRuleId), {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updateBody),
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(formatApiError(err));
+          }
+          showMsg('规则已更新');
+        } else {
+          const r = await fetch(API + '/api/rules', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({}));
+            throw new Error(formatApiError(err));
+          }
+          showMsg('规则已添加');
+        }
+        loadRules();
+        loadScenarios();
+        cancelEdit();
+      } catch (e) {
+        showMsg(e.message, true);
+      }
+    }
+
+    async function deleteRule(id) {
+      if (!confirm('确定删除规则 ' + id + '？')) return;
+      try {
+        const r = await fetch(API + '/api/rules/' + encodeURIComponent(id), { method: 'DELETE' });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(formatApiError(err));
+        }
+        showMsg('已删除');
+        loadRules();
+        loadScenarios();
+      } catch (e) {
+        showMsg(e.message, true);
+      }
+    }
+
+    function cancelEdit() {
+      editingRuleId = null;
+      document.getElementById('rule-id').value = '';
+      document.getElementById('rule-pattern').value = '';
+      document.getElementById('form-msg').innerHTML = '';
+      hideEditPanel();
+    }
+
+    function showMsg(msg, isErr) {
+      const el = document.getElementById('form-msg');
+      el.innerHTML = '<div class="msg ' + (isErr ? 'err' : 'ok') + '">' + escapeHtml(msg) + '</div>';
+      setTimeout(() => { el.innerHTML = ''; }, 3000);
+    }
+
+    function showNewScenarioModal() {
+      document.getElementById('new-scenario-id').value = '';
+      document.getElementById('modal-scenario').classList.add('show');
+    }
+
+    async function createScenario() {
+      const id = document.getElementById('new-scenario-id').value.trim();
+      if (!id) return;
+      try {
+        const r = await fetch(API + '/api/scenarios', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scenario_id: id }),
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(err.detail || r.statusText);
+        }
+        closeModal('modal-scenario');
+        selectScenario(id);
+        loadScenarios();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    function showActivateModal() {
+      document.getElementById('activate-scenario').value = currentScenario || 'default';
+      document.getElementById('activate-ip').value = '';
+      document.getElementById('activate-rule-ids').value = '';
+      document.getElementById('modal-activate').classList.add('show');
+    }
+
+    async function doActivate() {
+      const scenario_id = document.getElementById('activate-scenario').value.trim();
+      const client_ip = document.getElementById('activate-ip').value.trim();
+      if (!scenario_id || !client_ip) {
+        alert('场景 ID 和客户端 IP 必填');
+        return;
+      }
+      const ruleIdsStr = document.getElementById('activate-rule-ids').value.trim();
+      const rule_ids = ruleIdsStr ? ruleIdsStr.split(',').map(s => s.trim()).filter(Boolean) : null;
+      try {
+        const r = await fetch(API + '/api/activate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scenario_id, client_ip, rule_ids }),
+        });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(err.detail || r.statusText);
+        }
+        closeModal('modal-activate');
+        loadActivations();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function deactivateIp(ip) {
+      try {
+        const r = await fetch(API + '/api/activate/ip/' + encodeURIComponent(ip), { method: 'DELETE' });
+        if (!r.ok) {
+          const err = await r.json().catch(() => ({}));
+          throw new Error(formatApiError(err));
+        }
+        loadActivations();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('show');
+    }
+
+    function refresh() {
+      loadScenarios();
+      loadRules();
+      loadActivations();
+    }
+
+    (async function init() {
+      const scenarios = await fetchJson('/api/scenarios').catch(() => []);
+      if (scenarios.length > 0 && !currentScenario) {
+        selectScenario(scenarios[0]);
+      } else {
+        await loadScenarios();
+        loadRules();
+      }
+      loadActivations();
+    })();
+  </script>
+</body>
+</html>

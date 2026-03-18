@@ -2,6 +2,7 @@
 
 基于 mitmproxy 的代理服务，用于 UI 自动化测试中的请求拦截与改写。支持 CLI（自动化）与 MCP（交互式调试）。
 
+- **工具说明**：[TOOL_GUIDE.md](docs/TOOL_GUIDE.md) — 安装、配置、入口、命令与 API 参考
 - **外部系统集成**：[使用规范 (INTEGRATION.md)](docs/INTEGRATION.md) — REST API、调用流程与示例
 - **AI 编程场景**：[AI Coding 使用指南 (AI_CODING_GUIDE.md)](docs/AI_CODING_GUIDE.md) — MCP 集成、对话式 mock、TDD 等
 
@@ -128,6 +129,8 @@ beacon-proxy api
 ```
 
 **证书配置**：HTTPS 拦截需在设备上安装 CA 证书。证书默认存于 `~/.mitmproxy`，可通过 `BEACON_PROXY_CONFDIR` 自定义。设备配置代理后访问 `http://<API地址>:8765/certificate` 下载；移动端需 `--api-host 0.0.0.0`。详见 [INTEGRATION.md 7.1 证书配置与安装](docs/INTEGRATION.md)。
+
+**规则编辑器**：API 启动后访问 `http://<API地址>:8765/rules` 或 `/editor`，可可视化管理场景、规则与激活。
 
 **API 示例：**
 

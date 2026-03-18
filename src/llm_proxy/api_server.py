@@ -1,7 +1,9 @@
-"""REST API for activation - UI automation calls to activate device rules."""
+"""REST API for activation - UI automation calls to activate scenario rules."""
 
 import os
 from pathlib import Path
+
+_EDITOR_HTML_PATH = Path(__file__).parent / "static" / "editor.html"
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
@@ -157,6 +159,161 @@ def get_activation_for_ip(client_ip: str) -> dict:
         "rule_count": len(rules),
         "rules": [{"id": r.id, "url_pattern": r.url_pattern} for r in rules],
     }
+
+
+# --- 规则 CRUD API（编辑器用）---
+
+def _rule_to_dict(r: InterceptRule) -> dict:
+    d = r.model_dump() if hasattr(r, "model_dump") else r.dict()
+    return d
+
+
+class RuleCreate(BaseModel):
+    """Create rule request."""
+
+    id: Optional[str] = None
+    url_pattern: str
+    description: Optional[str] = None
+    status_code: Optional[int] = None
+    body: Optional[str] = None
+    use_regex: bool = False
+    upstream_host: Optional[str] = None
+    upstream_port: Optional[int] = None
+    scenario_id: Optional[str] = None
+
+
+class RuleUpdate(BaseModel):
+    """Update rule request - partial."""
+
+    url_pattern: Optional[str] = None
+    description: Optional[str] = None
+    status_code: Optional[int] = None
+    body: Optional[str] = None
+    use_regex: Optional[bool] = None
+    upstream_host: Optional[str] = None
+    upstream_port: Optional[int] = None
+
+
+class BindRequest(BaseModel):
+    scenario_id: str
+
+
+@app.get("/api/rules/definitions")
+def list_rule_definitions() -> List[dict]:
+    """List all rule definitions (reuse mode)."""
+    manager = _get_manager()
+    rules = manager.list_definitions()
+    return [_rule_to_dict(r) for r in rules]
+
+
+@app.get("/api/rules")
+def list_rules(scenario_id: Optional[str] = None) -> List[dict]:
+    """List rules for scenario (or default)."""
+    manager = _get_manager()
+    rules = manager.get_intercept_rules(scenario_id)
+    return [_rule_to_dict(r) for r in rules]
+
+
+@app.get("/api/scenarios")
+def list_scenarios() -> List[str]:
+    """List scenario ids (reuse mode)."""
+    manager = _get_manager()
+    return manager.list_scenarios()
+
+
+class ScenarioCreate(BaseModel):
+    scenario_id: str
+
+
+@app.post("/api/scenarios", status_code=201)
+def create_scenario_api(req: ScenarioCreate) -> dict:
+    """Create new scenario (reuse mode)."""
+    manager = _get_manager()
+    if manager.create_scenario(req.scenario_id):
+        return {"ok": True, "scenario_id": req.scenario_id}
+    raise HTTPException(status_code=400, detail=f"Scenario {req.scenario_id} exists or not in reuse mode")
+
+
+@app.post("/api/rules", status_code=201)
+def create_rule(req: RuleCreate) -> dict:
+    """Create rule, optionally bind to scenario."""
+    manager = _get_manager()
+    rid = req.id or f"rule_{len(manager.list_definitions()) + 1}"
+    rule = InterceptRule(
+        id=rid,
+        url_pattern=req.url_pattern,
+        description=req.description,
+        status_code=req.status_code,
+        body=req.body,
+        use_regex=req.use_regex,
+        upstream_host=req.upstream_host,
+        upstream_port=req.upstream_port,
+    )
+    manager.add_rule(rule, req.scenario_id)
+    return _rule_to_dict(rule)
+
+
+@app.get("/api/rules/{rule_id}")
+def get_rule(rule_id: str) -> dict:
+    """Get single rule by id (from definitions)."""
+    manager = _get_manager()
+    rule = manager.get_definition(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
+    return _rule_to_dict(rule)
+
+
+@app.put("/api/rules/{rule_id}")
+def update_rule(rule_id: str, req: RuleUpdate) -> dict:
+    """Update rule definition."""
+    manager = _get_manager()
+    updates = req.model_dump(exclude_none=True) if hasattr(req, "model_dump") else {k: v for k, v in req.dict().items() if v is not None}
+    rule = manager.update_rule(rule_id, updates)
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
+    return _rule_to_dict(rule)
+
+
+@app.delete("/api/rules/{rule_id}")
+def delete_rule(rule_id: str, scenario_id: Optional[str] = None) -> dict:
+    """Delete rule. scenario_id: unbind only. Omit: delete definition."""
+    manager = _get_manager()
+    if scenario_id:
+        if manager.unbind_rule(rule_id, scenario_id):
+            return {"ok": True, "message": f"Unbound {rule_id} from {scenario_id}"}
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not bound to {scenario_id}")
+    if manager.remove_rule(rule_id):
+        return {"ok": True, "message": f"Deleted rule {rule_id}"}
+    raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
+
+
+@app.post("/api/rules/{rule_id}/bind")
+def bind_rule_to_scenario(rule_id: str, req: BindRequest) -> dict:
+    """Bind rule to scenario."""
+    manager = _get_manager()
+    if manager.bind_rule(rule_id, req.scenario_id):
+        return {"ok": True, "message": f"Bound {rule_id} to {req.scenario_id}"}
+    raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found or not in reuse mode")
+
+
+@app.delete("/api/rules/{rule_id}/bind/{scenario_id}")
+def unbind_rule_from_scenario(rule_id: str, scenario_id: str) -> dict:
+    """Unbind rule from scenario."""
+    manager = _get_manager()
+    if manager.unbind_rule(rule_id, scenario_id):
+        return {"ok": True, "message": f"Unbound {rule_id} from {scenario_id}"}
+    raise HTTPException(status_code=404, detail=f"Rule {rule_id} not bound to {scenario_id}")
+
+
+# --- 规则编辑器 ---
+
+@app.get("/rules", response_class=HTMLResponse)
+@app.get("/editor", response_class=HTMLResponse)
+def rule_editor_page() -> HTMLResponse:
+    """规则编辑器单页。"""
+    if _EDITOR_HTML_PATH.exists():
+        return HTMLResponse(content=_EDITOR_HTML_PATH.read_text(encoding="utf-8"))
+    raise HTTPException(status_code=404, detail="Editor not found")
 
 
 # --- 证书安装 ---
