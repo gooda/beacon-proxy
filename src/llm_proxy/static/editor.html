@@ -434,7 +434,10 @@
     }
 
     function showEditPanel() {
-      document.querySelector('.main').classList.add('edit-open');
+      const main = document.querySelector('.main');
+      main.classList.add('edit-open');
+      const panel = document.getElementById('panel-edit');
+      if (panel) requestAnimationFrame(() => panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' }));
     }
     function hideEditPanel() {
       document.querySelector('.main').classList.remove('edit-open');
@@ -442,7 +445,8 @@
 
     function startAddRule() {
       if (!currentScenario) {
-        showMsg('请先选择场景', true);
+        showEditPanel();
+        showMsg('请先选择左侧场景，若无场景请点击「+ 新建场景」', true);
         return;
       }
       editingRuleId = null;

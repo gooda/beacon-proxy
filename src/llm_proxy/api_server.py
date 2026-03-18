@@ -229,9 +229,15 @@ class ScenarioCreate(BaseModel):
 def create_scenario_api(req: ScenarioCreate) -> dict:
     """Create new scenario (reuse mode)."""
     manager = _get_manager()
-    if manager.create_scenario(req.scenario_id):
+    err = manager.create_scenario(req.scenario_id)
+    if err is None:
         return {"ok": True, "scenario_id": req.scenario_id}
-    raise HTTPException(status_code=400, detail=f"Scenario {req.scenario_id} exists or not in reuse mode")
+    if err == "exists":
+        raise HTTPException(status_code=400, detail=f"场景 {req.scenario_id} 已存在")
+    raise HTTPException(
+        status_code=400,
+        detail="需要目录模式：请将 LLM_PROXY_RULES 或 --rules 指向 rules 目录（含 definitions/ 和 scenarios/），而非单文件",
+    )
 
 
 @app.post("/api/rules", status_code=201)

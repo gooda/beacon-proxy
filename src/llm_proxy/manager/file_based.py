@@ -352,15 +352,15 @@ class FileBasedManager:
             return []
         return sorted(p.stem for p in scenarios_dir.glob("*.yaml"))
 
-    def create_scenario(self, scenario_id: str) -> bool:
-        """Create empty scenario config. Returns True if created."""
+    def create_scenario(self, scenario_id: str) -> Optional[str]:
+        """Create empty scenario config. Returns None if created, else error reason."""
         if not self._reuse_mode:
-            return False
+            return "not_reuse_mode"
         path = self._scenario_path(scenario_id)
         if path.exists():
-            return False
+            return "exists"
         self._save_scenario_config(scenario_id, ScenarioConfigSchema())
-        return True
+        return None
 
     def update_rule(self, rule_id: str, updates: Dict[str, Any]) -> Optional[InterceptRule]:
         """Update a rule definition. Returns updated rule or None if not found. id cannot be changed."""

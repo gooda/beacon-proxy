@@ -235,8 +235,10 @@ def start(
 ) -> None:
     """Start the proxy server."""
     path = rules_file or os.environ.get("LLM_PROXY_RULES", "rules.yaml")
+    rules_abs = str(Path(path).absolute())
+    os.environ["LLM_PROXY_RULES"] = rules_abs  # API 线程与 mitmdump 子进程均需此变量
     env = os.environ.copy()
-    env["LLM_PROXY_RULES"] = str(Path(path).absolute())
+    env["LLM_PROXY_RULES"] = rules_abs
     src_dir = str(Path(__file__).parent.parent)
     env["PYTHONPATH"] = src_dir + os.pathsep + env.get("PYTHONPATH", "")
 
