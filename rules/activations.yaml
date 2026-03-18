@@ -1,5 +1,5 @@
-device_rule_overrides:
-  device_A:
+ip_to_scenario:
+  192.168.1.101: scenario_A
+scenario_rule_overrides:
+  scenario_A:
   - login_500
-ip_to_device:
-  192.168.1.101: device_A

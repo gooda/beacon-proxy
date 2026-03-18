@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
@@ -13,6 +13,22 @@ from llm_proxy.manager.file_based import FileBasedManager
 from llm_proxy.models import InterceptRule, ProxyConfig
 
 app = FastAPI(title="Beacon Proxy API", version="0.1.0")
+
+
+def _inline_rule_to_intercept_rule(r: Dict[str, Any]) -> InterceptRule:
+    """Convert APPAUTO inline rule dict to InterceptRule."""
+    rid = r.get("id") or f"inline_{hash(str(r)) % 10**8}"
+    url = r.get("url") or r.get("url_pattern") or ""
+    return InterceptRule(
+        id=str(rid),
+        url_pattern=url,
+        description=r.get("description"),
+        status_code=r.get("status_code"),
+        body=r.get("body") or r.get("response"),
+        use_regex=r.get("use_regex", False),
+        upstream_host=r.get("upstream_host"),
+        upstream_port=r.get("upstream_port"),
+    )
 
 
 def _get_cert_dir() -> Path:
@@ -26,9 +42,13 @@ def _get_manager() -> FileBasedManager:
 
 
 class ActivateRequest(BaseModel):
-    device_id: str
+    scenario_id: str
     client_ip: str
     rule_ids: Optional[List[str]] = None
+    rules: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Inline rules (APPAUTO). url/url_pattern, status_code, response/body, upstream_host, upstream_port",
+    )
 
 
 class ActivateResponse(BaseModel):
@@ -40,7 +60,7 @@ class GenerateRequest(BaseModel):
     """根据代理需求生成规则并生效。"""
 
     requirement: str = Field(..., description="自然语言需求，如：登录失败、购物车空、/api/xxx 返回 500")
-    device_id: str = Field(default="default", description="设备 ID")
+    scenario_id: str = Field(default="default", description="场景 ID")
     client_ip: str = Field(..., description="客户端 IP（被测设备），用于激活")
 
 
@@ -68,36 +88,43 @@ def generate_and_activate(req: GenerateRequest) -> GenerateResponse:
 
     rule_ids: List[str] = []
     for rule in rules:
-        manager.add_rule(rule, req.device_id)
+        manager.add_rule(rule, req.scenario_id)
         rule_ids.append(rule.id)
 
-    manager.activate(req.device_id, req.client_ip, rule_ids)
+    manager.activate(req.scenario_id, req.client_ip, rule_ids)
     return GenerateResponse(
         ok=True,
-        message=f"已生成 {len(rule_ids)} 条规则并激活：{req.device_id} -> {req.client_ip}",
+        message=f"已生成 {len(rule_ids)} 条规则并激活：{req.scenario_id} -> {req.client_ip}",
         rule_ids=rule_ids,
     )
 
 
 @app.post("/api/activate", response_model=ActivateResponse)
 def activate(req: ActivateRequest) -> ActivateResponse:
-    """Activate device rules for client IP. UI automation calls this before running tests."""
+    """Activate scenario rules for client IP. UI automation calls this before running tests.
+    Supports rule_ids (from definitions) and rules (inline from APPAUTO, incl. upstream_host for domain rewrite).
+    """
     manager = _get_manager()
-    manager.activate(req.device_id, req.client_ip, req.rule_ids)
-    rules_desc = f" rules {req.rule_ids}" if req.rule_ids else ""
+    inline_rules: Optional[List[InterceptRule]] = None
+    if req.rules:
+        inline_rules = [_inline_rule_to_intercept_rule(r) for r in req.rules]
+    manager.activate(req.scenario_id, req.client_ip, req.rule_ids, inline_rules)
+    rules_desc = f" rule_ids={req.rule_ids}" if req.rule_ids else ""
+    if inline_rules:
+        rules_desc += f" inline={len(inline_rules)}" if rules_desc else f"inline={len(inline_rules)}"
     return ActivateResponse(
         ok=True,
-        message=f"Activated device {req.device_id} for IP {req.client_ip}{rules_desc}",
+        message=f"Activated scenario {req.scenario_id} for IP {req.client_ip}" + (f" {rules_desc}" if rules_desc else ""),
     )
 
 
-@app.delete("/api/activate/{device_id}", response_model=ActivateResponse)
-def deactivate_by_device(device_id: str) -> ActivateResponse:
-    """Deactivate all activations for device."""
+@app.delete("/api/activate/{scenario_id}", response_model=ActivateResponse)
+def deactivate_by_scenario(scenario_id: str) -> ActivateResponse:
+    """Deactivate all activations for scenario."""
     manager = _get_manager()
-    if manager.deactivate(device_id=device_id):
-        return ActivateResponse(ok=True, message=f"Deactivated device {device_id}")
-    raise HTTPException(status_code=404, detail=f"Device {device_id} not found in activations")
+    if manager.deactivate(scenario_id=scenario_id):
+        return ActivateResponse(ok=True, message=f"Deactivated scenario {scenario_id}")
+    raise HTTPException(status_code=404, detail=f"Scenario {scenario_id} not found in activations")
 
 
 @app.delete("/api/activate/ip/{client_ip}", response_model=ActivateResponse)
@@ -111,22 +138,22 @@ def deactivate_by_ip(client_ip: str) -> ActivateResponse:
 
 @app.get("/api/activate")
 def list_activations() -> dict:
-    """List all activations (ip_to_device, device_rule_overrides)."""
+    """List all activations (ip_to_scenario, scenario_rule_overrides)."""
     manager = _get_manager()
     return manager.list_activations()
 
 
 @app.get("/api/activate/ip/{client_ip}")
 def get_activation_for_ip(client_ip: str) -> dict:
-    """Get device_id and rules for client IP."""
+    """Get scenario_id and rules for client IP."""
     manager = _get_manager()
-    device_id = manager.get_device_id_by_client_ip(client_ip)
-    if not device_id:
+    scenario_id = manager.get_scenario_id_by_client_ip(client_ip)
+    if not scenario_id:
         raise HTTPException(status_code=404, detail=f"No activation for IP {client_ip}")
     rules = manager.get_intercept_rules_for_client(client_ip)
     return {
         "client_ip": client_ip,
-        "device_id": device_id,
+        "scenario_id": scenario_id,
         "rule_count": len(rules),
         "rules": [{"id": r.id, "url_pattern": r.url_pattern} for r in rules],
     }

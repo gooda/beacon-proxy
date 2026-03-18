@@ -1,4 +1,4 @@
-"""File-based manager - supports single-file, multi-device, and rule reuse (definitions + devices)."""
+"""File-based manager - supports single-file, multi-scenario, and rule reuse (definitions + scenarios)."""
 
 import re
 from pathlib import Path
@@ -25,23 +25,23 @@ def _pydantic_dump(obj: BaseModel) -> Dict[str, Any]:
 
 
 class RulesFileSchema(BaseModel):
-    """Schema for single-file or legacy device rules."""
+    """Schema for single-file or legacy scenario rules."""
 
     rules: List[InterceptRule] = []
 
 
-class DeviceConfigSchema(BaseModel):
-    """Schema for device config - references rule_ids, optional overrides."""
+class ScenarioConfigSchema(BaseModel):
+    """Schema for scenario config - references rule_ids, optional overrides."""
 
     rule_ids: List[str] = []
     overrides: Dict[str, Dict[str, Any]] = {}
 
 
 class ActivationsSchema(BaseModel):
-    """Schema for activations - IP to device mapping, optional rule overrides."""
+    """Schema for activations - IP to scenario mapping, optional rule overrides."""
 
-    ip_to_device: Dict[str, str] = {}  # client_ip -> device_id
-    device_rule_overrides: Dict[str, List[str]] = {}  # device_id -> rule_ids (override devices/*.yaml)
+    ip_to_scenario: Dict[str, str] = {}  # client_ip -> scenario_id
+    scenario_rule_overrides: Dict[str, List[str]] = {}  # scenario_id -> rule_ids (override scenarios/*.yaml)
 
 
 def _safe_filename(name: str) -> str:
@@ -50,20 +50,22 @@ def _safe_filename(name: str) -> str:
 
 
 class FileBasedManager:
-    """Manager supporting: single-file, multi-device, and rule reuse (definitions + devices)."""
+    """Manager supporting: single-file, multi-scenario, and rule reuse (definitions + scenarios)."""
 
     def __init__(self, rules_path: str, config: Optional[ProxyConfig] = None):
         self._rules_base = Path(str(rules_path).rstrip("/"))
         self._config = config or ProxyConfig()
         self._state = ProxyState()
         self._single_file = self._rules_base.suffix in (".yaml", ".yml")
-        self._reuse_mode = not self._single_file  # directory => definitions + devices
+        self._reuse_mode = not self._single_file  # directory => definitions + scenarios
+        # Inline rules from APPAUTO activate API (scenario_id -> rules), ephemeral, not persisted
+        self._scenario_inline_rules: Dict[str, List[InterceptRule]] = {}
 
     def _definitions_dir(self) -> Path:
         return self._rules_base / "definitions"
 
-    def _devices_dir(self) -> Path:
-        return self._rules_base / "devices"
+    def _scenarios_dir(self) -> Path:
+        return self._rules_base / "scenarios"
 
     def _activations_path(self) -> Path:
         """Activations file: same dir as rules.yaml, or rules/activations.yaml."""
@@ -89,27 +91,27 @@ class FileBasedManager:
     def _definition_path(self, rule_id: str) -> Path:
         return self._definitions_dir() / f"{_safe_filename(rule_id)}.yaml"
 
-    def _device_path(self, device_id: str) -> Path:
-        return self._devices_dir() / f"{_safe_filename(device_id)}.yaml"
+    def _scenario_path(self, scenario_id: str) -> Path:
+        return self._scenarios_dir() / f"{_safe_filename(scenario_id)}.yaml"
 
-    def _get_rules_path(self, device_id: Optional[str] = None) -> Path:
-        """Legacy: path for single-file or old multi-device format."""
+    def _get_rules_path(self, scenario_id: Optional[str] = None) -> Path:
+        """Legacy: path for single-file or old multi-scenario format."""
         if self._single_file:
             return self._rules_base
-        filename = f"{device_id or 'default'}.yaml"
+        filename = f"{scenario_id or 'default'}.yaml"
         return self._rules_base / filename
 
-    def _load_device_config(self, device_id: str) -> DeviceConfigSchema:
-        path = self._device_path(device_id)
+    def _load_scenario_config(self, scenario_id: str) -> ScenarioConfigSchema:
+        path = self._scenario_path(scenario_id)
         if path.exists():
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            return _pydantic_validate(DeviceConfigSchema, data)
-        if device_id and device_id != "default":
-            return self._load_device_config("default")
-        return DeviceConfigSchema()
+            return _pydantic_validate(ScenarioConfigSchema, data)
+        if scenario_id and scenario_id != "default":
+            return self._load_scenario_config("default")
+        return ScenarioConfigSchema()
 
-    def _save_device_config(self, device_id: str, config: DeviceConfigSchema) -> None:
-        path = self._device_path(device_id)
+    def _save_scenario_config(self, scenario_id: str, config: ScenarioConfigSchema) -> None:
+        path = self._scenario_path(scenario_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             yaml.dump(_pydantic_dump(config), allow_unicode=True, default_flow_style=False),
@@ -140,10 +142,10 @@ class FileBasedManager:
 
     def get_intercept_rules(
         self,
-        device_id: Optional[str] = None,
+        scenario_id: Optional[str] = None,
         rule_ids_override: Optional[List[str]] = None,
     ) -> List[InterceptRule]:
-        """Get rules for device. rule_ids_override: use these instead of device config (reuse mode)."""
+        """Get rules for scenario. rule_ids_override: use these instead of scenario config (reuse mode)."""
         if self._single_file:
             path = self._get_rules_path()
             if path.exists():
@@ -152,13 +154,13 @@ class FileBasedManager:
                 return schema.rules.copy()
             return []
 
-        dev_id = device_id or "default"
+        sid = scenario_id or "default"
         rule_ids = rule_ids_override
         if rule_ids is None:
-            config = self._load_device_config(dev_id)
+            config = self._load_scenario_config(sid)
             rule_ids = config.rule_ids
         else:
-            config = self._load_device_config(dev_id)
+            config = self._load_scenario_config(sid)
 
         result: List[InterceptRule] = []
         for rid in rule_ids:
@@ -168,53 +170,70 @@ class FileBasedManager:
                 if over:
                     rule = rule.model_copy(update=over)
                 result.append(rule)
-        return result
+        inline = self._scenario_inline_rules.get(sid, [])
+        return result + inline
 
-    def get_device_id_by_client_ip(self, client_ip: str) -> Optional[str]:
-        """Get device_id for client IP from activations."""
+    def get_scenario_id_by_client_ip(self, client_ip: str) -> Optional[str]:
+        """Get scenario_id for client IP from activations."""
         acts = self._load_activations()
-        return acts.ip_to_device.get(client_ip)
+        return acts.ip_to_scenario.get(client_ip)
 
     def get_intercept_rules_for_client(self, client_ip: str) -> List[InterceptRule]:
         """Get rules for client by IP (activation). Returns [] if not activated."""
         acts = self._load_activations()
-        device_id = acts.ip_to_device.get(client_ip)
-        if not device_id:
+        scenario_id = acts.ip_to_scenario.get(client_ip)
+        if not scenario_id:
             return []
+        file_rules: List[InterceptRule]
         if self._single_file:
-            return self.get_intercept_rules()
-        rule_ids = acts.device_rule_overrides.get(device_id)
-        return self.get_intercept_rules(device_id, rule_ids)
+            file_rules = self.get_intercept_rules()
+        else:
+            rule_ids = acts.scenario_rule_overrides.get(scenario_id)
+            file_rules = self.get_intercept_rules(scenario_id, rule_ids)
+        inline = self._scenario_inline_rules.get(scenario_id, [])
+        return file_rules + inline
 
     def activate(
         self,
-        device_id: str,
+        scenario_id: str,
         client_ip: str,
         rule_ids: Optional[List[str]] = None,
+        inline_rules: Optional[List[InterceptRule]] = None,
     ) -> None:
-        """Activate device for client IP. rule_ids overrides device config (reuse mode)."""
+        """Activate scenario for client IP. rule_ids overrides scenario config (reuse mode).
+        inline_rules: ephemeral rules from APPAUTO (networkMock, networkDomainRewrite)."""
         acts = self._load_activations()
-        acts.ip_to_device[client_ip] = device_id
+        acts.ip_to_scenario[client_ip] = scenario_id
         if rule_ids is not None and self._reuse_mode:
-            acts.device_rule_overrides[device_id] = rule_ids
-        elif device_id in acts.device_rule_overrides:
-            del acts.device_rule_overrides[device_id]
+            acts.scenario_rule_overrides[scenario_id] = rule_ids
+        elif scenario_id in acts.scenario_rule_overrides:
+            del acts.scenario_rule_overrides[scenario_id]
+        if inline_rules:
+            self._scenario_inline_rules[scenario_id] = inline_rules.copy()
+        else:
+            self._scenario_inline_rules.pop(scenario_id, None)
         self._save_activations(acts)
 
-    def deactivate(self, device_id: Optional[str] = None, client_ip: Optional[str] = None) -> bool:
-        """Deactivate. By device_id or client_ip."""
+    def deactivate(self, scenario_id: Optional[str] = None, client_ip: Optional[str] = None) -> bool:
+        """Deactivate. By scenario_id or client_ip."""
         acts = self._load_activations()
         changed = False
-        if client_ip and client_ip in acts.ip_to_device:
-            del acts.ip_to_device[client_ip]
+        if client_ip and client_ip in acts.ip_to_scenario:
+            scenario_from_ip = acts.ip_to_scenario[client_ip]
+            del acts.ip_to_scenario[client_ip]
             changed = True
-        if device_id:
-            to_remove = [ip for ip, did in acts.ip_to_device.items() if did == device_id]
+            if scenario_from_ip in self._scenario_inline_rules:
+                del self._scenario_inline_rules[scenario_from_ip]
+        if scenario_id:
+            to_remove = [ip for ip, sid in acts.ip_to_scenario.items() if sid == scenario_id]
             for ip in to_remove:
-                del acts.ip_to_device[ip]
+                del acts.ip_to_scenario[ip]
                 changed = True
-            if device_id in acts.device_rule_overrides:
-                del acts.device_rule_overrides[device_id]
+            if scenario_id in acts.scenario_rule_overrides:
+                del acts.scenario_rule_overrides[scenario_id]
+                changed = True
+            if scenario_id in self._scenario_inline_rules:
+                del self._scenario_inline_rules[scenario_id]
                 changed = True
         if changed:
             self._save_activations(acts)
@@ -231,8 +250,8 @@ class FileBasedManager:
     def get_state(self) -> ProxyState:
         return self._state.model_copy(deep=True)
 
-    def add_rule(self, rule: InterceptRule, device_id: Optional[str] = None) -> None:
-        """Add rule. In reuse mode: save to definitions, optionally bind to device."""
+    def add_rule(self, rule: InterceptRule, scenario_id: Optional[str] = None) -> None:
+        """Add rule. In reuse mode: save to definitions, optionally bind to scenario."""
         if self._single_file:
             path = self._get_rules_path()
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {} if path.exists() else {}
@@ -247,11 +266,11 @@ class FileBasedManager:
             return
 
         self._save_definition(rule)
-        if device_id:
-            self.bind_rule(rule.id, device_id)
+        if scenario_id:
+            self.bind_rule(rule.id, scenario_id)
 
-    def remove_rule(self, rule_id: str, device_id: Optional[str] = None) -> bool:
-        """Remove rule. If device_id: unbind from device. Else: delete definition and unbind from all."""
+    def remove_rule(self, rule_id: str, scenario_id: Optional[str] = None) -> bool:
+        """Remove rule. If scenario_id: unbind from scenario. Else: delete definition and unbind from all."""
         if self._single_file:
             path = self._get_rules_path()
             if not path.exists():
@@ -268,40 +287,40 @@ class FileBasedManager:
                 return True
             return False
 
-        if device_id:
-            return self.unbind_rule(rule_id, device_id)
+        if scenario_id:
+            return self.unbind_rule(rule_id, scenario_id)
 
         self._delete_definition(rule_id)
-        for p in self._devices_dir().glob("*.yaml"):
-            dev_id = p.stem
-            config = self._load_device_config(dev_id)
+        for p in self._scenarios_dir().glob("*.yaml"):
+            sid = p.stem
+            config = self._load_scenario_config(sid)
             if rule_id in config.rule_ids:
                 config.rule_ids = [x for x in config.rule_ids if x != rule_id]
                 config.overrides.pop(rule_id, None)
-                self._save_device_config(dev_id, config)
+                self._save_scenario_config(sid, config)
         return True
 
-    def bind_rule(self, rule_id: str, device_id: str) -> bool:
-        """Bind rule to device (reuse mode only)."""
+    def bind_rule(self, rule_id: str, scenario_id: str) -> bool:
+        """Bind rule to scenario (reuse mode only)."""
         if not self._reuse_mode:
             return False
         if not self._load_definition(rule_id):
             return False
-        config = self._load_device_config(device_id)
+        config = self._load_scenario_config(scenario_id)
         if rule_id not in config.rule_ids:
             config.rule_ids.append(rule_id)
-            self._save_device_config(device_id, config)
+            self._save_scenario_config(scenario_id, config)
         return True
 
-    def unbind_rule(self, rule_id: str, device_id: str) -> bool:
-        """Unbind rule from device (reuse mode only)."""
+    def unbind_rule(self, rule_id: str, scenario_id: str) -> bool:
+        """Unbind rule from scenario (reuse mode only)."""
         if not self._reuse_mode:
             return False
-        config = self._load_device_config(device_id)
+        config = self._load_scenario_config(scenario_id)
         if rule_id in config.rule_ids:
             config.rule_ids = [x for x in config.rule_ids if x != rule_id]
             config.overrides.pop(rule_id, None)
-            self._save_device_config(device_id, config)
+            self._save_scenario_config(scenario_id, config)
             return True
         return False
 

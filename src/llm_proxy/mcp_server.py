@@ -35,11 +35,11 @@ def create_mcp_server() -> "FastMCP":
         use_regex: bool = False,
         upstream_host: Optional[str] = None,
         upstream_port: Optional[int] = None,
-        device_id: Optional[str] = None,
+        scenario_id: Optional[str] = None,
     ) -> str:
-        """Add an intercept rule. url_pattern: URL to match. upstream_host: rewrite to this host (A域名->B域名). status_code, body: response override. device_id: for per-device rules."""
+        """Add an intercept rule. url_pattern: URL to match. upstream_host: rewrite to this host (A域名->B域名). status_code, body: response override. scenario_id: for per-scenario rules."""
         manager = _get_manager()
-        rules = manager.get_intercept_rules(device_id)
+        rules = manager.get_intercept_rules(scenario_id)
         rid = rule_id or f"rule_{len(rules) + 1}"
         rule = InterceptRule(
             id=rid,
@@ -51,8 +51,8 @@ def create_mcp_server() -> "FastMCP":
             upstream_host=upstream_host,
             upstream_port=upstream_port,
         )
-        manager.add_rule(rule, device_id)
-        target = f" (device={device_id})" if device_id else ""
+        manager.add_rule(rule, scenario_id)
+        target = f" (scenario={scenario_id})" if scenario_id else ""
         return f"Added rule {rid}: {url_pattern}{target}"
 
     @mcp.tool()
@@ -61,11 +61,11 @@ def create_mcp_server() -> "FastMCP":
         to_host: str,
         rule_id: Optional[str] = None,
         port: int = 443,
-        device_id: Optional[str] = None,
+        scenario_id: Optional[str] = None,
     ) -> str:
-        """添加域名重写规则：将 A 域名的请求代理转发到 B 域名。from_host: 源域名。to_host: 目标域名。port: 目标端口。device_id: 绑定到设备。"""
+        """添加域名重写规则：将 A 域名的请求代理转发到 B 域名。from_host: 源域名。to_host: 目标域名。port: 目标端口。scenario_id: 绑定到场景。"""
         manager = _get_manager()
-        rules = manager.get_intercept_rules(device_id)
+        rules = manager.get_intercept_rules(scenario_id)
         rid = rule_id or f"rewrite_{len(rules) + 1}"
         rule = InterceptRule(
             id=rid,
@@ -75,33 +75,33 @@ def create_mcp_server() -> "FastMCP":
             upstream_port=port,
             use_regex=False,
         )
-        manager.add_rule(rule, device_id)
-        target = f" (device={device_id})" if device_id else ""
+        manager.add_rule(rule, scenario_id)
+        target = f" (scenario={scenario_id})" if scenario_id else ""
         return f"Added rewrite {rid}: {from_host} -> {to_host}:{port}{target}"
 
     @mcp.tool()
-    def remove_rule(rule_id: str, device_id: Optional[str] = None) -> str:
-        """Remove an intercept rule. device_id: unbind from device only. Omit to delete definition."""
+    def remove_rule(rule_id: str, scenario_id: Optional[str] = None) -> str:
+        """Remove an intercept rule. scenario_id: unbind from scenario only. Omit to delete definition."""
         manager = _get_manager()
-        if manager.remove_rule(rule_id, device_id):
+        if manager.remove_rule(rule_id, scenario_id):
             return f"Removed rule {rule_id}"
         return f"Rule {rule_id} not found"
 
     @mcp.tool()
-    def bind_rule(rule_id: str, device_id: str) -> str:
-        """Bind a rule definition to a device (reuse mode)."""
+    def bind_rule(rule_id: str, scenario_id: str) -> str:
+        """Bind a rule definition to a scenario (reuse mode)."""
         manager = _get_manager()
-        if manager.bind_rule(rule_id, device_id):
-            return f"Bound {rule_id} to {device_id}"
+        if manager.bind_rule(rule_id, scenario_id):
+            return f"Bound {rule_id} to {scenario_id}"
         return f"Failed: rule {rule_id} not found"
 
     @mcp.tool()
-    def unbind_rule(rule_id: str, device_id: str) -> str:
-        """Unbind a rule from a device (reuse mode)."""
+    def unbind_rule(rule_id: str, scenario_id: str) -> str:
+        """Unbind a rule from a scenario (reuse mode)."""
         manager = _get_manager()
-        if manager.unbind_rule(rule_id, device_id):
-            return f"Unbound {rule_id} from {device_id}"
-        return f"Rule {rule_id} not bound to {device_id}"
+        if manager.unbind_rule(rule_id, scenario_id):
+            return f"Unbound {rule_id} from {scenario_id}"
+        return f"Rule {rule_id} not bound to {scenario_id}"
 
     @mcp.tool()
     def list_definitions() -> str:
@@ -117,35 +117,35 @@ def create_mcp_server() -> "FastMCP":
         return "\n".join(lines)
 
     @mcp.tool()
-    def activate(device_id: str, client_ip: str, rule_ids: Optional[list] = None) -> str:
-        """Activate device rules for client IP. UI automation calls before test. rule_ids: optional override."""
+    def activate(scenario_id: str, client_ip: str, rule_ids: Optional[list] = None) -> str:
+        """Activate scenario rules for client IP. UI automation calls before test. rule_ids: optional override."""
         manager = _get_manager()
-        manager.activate(device_id, client_ip, rule_ids)
-        return f"Activated {device_id} for IP {client_ip}"
+        manager.activate(scenario_id, client_ip, rule_ids)
+        return f"Activated {scenario_id} for IP {client_ip}"
 
     @mcp.tool()
-    def deactivate(device_id: Optional[str] = None, client_ip: Optional[str] = None) -> str:
-        """Deactivate. Provide device_id or client_ip."""
+    def deactivate(scenario_id: Optional[str] = None, client_ip: Optional[str] = None) -> str:
+        """Deactivate. Provide scenario_id or client_ip."""
         manager = _get_manager()
-        if manager.deactivate(device_id=device_id, client_ip=client_ip):
+        if manager.deactivate(scenario_id=scenario_id, client_ip=client_ip):
             return "Deactivated"
         return "Not found in activations"
 
     @mcp.tool()
     def list_activations() -> str:
-        """List all activations (ip_to_device, device_rule_overrides)."""
+        """List all activations (ip_to_scenario, scenario_rule_overrides)."""
         manager = _get_manager()
         acts = manager.list_activations()
-        if not acts.get("ip_to_device"):
+        if not acts.get("ip_to_scenario"):
             return "No activations"
-        lines = [f"  {ip} -> {did}" for ip, did in acts["ip_to_device"].items()]
+        lines = [f"  {ip} -> {sid}" for ip, sid in acts["ip_to_scenario"].items()]
         return "\n".join(lines)
 
     @mcp.tool()
-    def list_rules(device_id: Optional[str] = None) -> str:
-        """List intercept rules for device. device_id: device to list."""
+    def list_rules(scenario_id: Optional[str] = None) -> str:
+        """List intercept rules for scenario. scenario_id: scenario to list."""
         manager = _get_manager()
-        rules = manager.get_intercept_rules(device_id)
+        rules = manager.get_intercept_rules(scenario_id)
         if not rules:
             return "No rules"
         lines = []
@@ -157,10 +157,10 @@ def create_mcp_server() -> "FastMCP":
     @mcp.tool()
     def generate_from_requirement(
         requirement: str,
-        device_id: str = "default",
+        scenario_id: str = "default",
         client_ip: str = "",
     ) -> str:
-        """根据代理需求自动生成规则并生效。requirement: 自然语言，如 登录失败、购物车空、/api/xxx 返回 500。device_id: 设备ID。client_ip: 被测设备IP，必填以激活。"""
+        """根据代理需求自动生成规则并生效。requirement: 自然语言，如 登录失败、购物车空、/api/xxx 返回 500。scenario_id: 场景ID。client_ip: 被测设备IP，必填以激活。"""
         if not client_ip:
             return "client_ip 必填，用于激活规则"
         manager = _get_manager()
@@ -169,10 +169,10 @@ def create_mcp_server() -> "FastMCP":
             return "无法解析需求，请使用：登录失败、购物车空、X 返回 Y、X 空 或 /api/xxx"
         rule_ids = []
         for rule in rules:
-            manager.add_rule(rule, device_id)
+            manager.add_rule(rule, scenario_id)
             rule_ids.append(rule.id)
-        manager.activate(device_id, client_ip, rule_ids)
-        return f"已生成并激活 {rule_ids}：{device_id} -> {client_ip}"
+        manager.activate(scenario_id, client_ip, rule_ids)
+        return f"已生成并激活 {rule_ids}：{scenario_id} -> {client_ip}"
 
     return mcp
 

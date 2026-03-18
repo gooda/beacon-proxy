@@ -8,8 +8,8 @@ from llm_proxy.models import InterceptRule, ProxyConfig, ProxyState
 class ManagementInterface(Protocol):
     """Management abstraction - proxy core depends on this."""
 
-    def get_intercept_rules(self, device_id: Optional[str] = None) -> List[InterceptRule]:
-        """Get intercept rules, optionally for a specific device."""
+    def get_intercept_rules(self, scenario_id: Optional[str] = None) -> List[InterceptRule]:
+        """Get intercept rules, optionally for a specific scenario."""
         ...
 
     def get_intercept_rules_for_client(self, client_ip: str) -> List[InterceptRule]:
@@ -24,11 +24,11 @@ class ManagementInterface(Protocol):
         """Get proxy state."""
         ...
 
-    def add_rule(self, rule: InterceptRule, device_id: Optional[str] = None) -> None:
-        """Add a rule, optionally for a specific device."""
+    def add_rule(self, rule: InterceptRule, scenario_id: Optional[str] = None) -> None:
+        """Add a rule, optionally for a specific scenario."""
         ...
 
-    def remove_rule(self, rule_id: str, device_id: Optional[str] = None) -> bool:
+    def remove_rule(self, rule_id: str, scenario_id: Optional[str] = None) -> bool:
         """Remove rule by id. Returns True if removed."""
         ...
 

@@ -24,9 +24,9 @@ class ProxyConfig(BaseModel):
 
     port: int = Field(default=8080, description="Proxy listen port")
     rules_file: str = Field(default="rules.yaml", description="Path to rules file or rules directory")
-    device_id_header: str = Field(
-        default="X-Device-ID",
-        description="Header name to identify device for per-device rules",
+    scenario_id_header: str = Field(
+        default="X-Scenario-ID",
+        description="Header name to identify scenario for per-scenario rules",
     )
 
 

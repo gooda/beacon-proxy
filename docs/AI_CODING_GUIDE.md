@@ -67,7 +67,7 @@ beacon-proxy add-rule "/api/login" --id login_500 --status 500 \
 1. 用户：设备 A (192.168.1.101) 要登录失败，设备 B (192.168.1.102) 正常
 2. AI 调用 REST API 或 MCP `activate`：
    ```
-   activate(device_id="device_A", client_ip="192.168.1.101", rule_ids=["login_500"])
+   activate(scenario_id="scenario_A", client_ip="192.168.1.101", rule_ids=["login_500"])
    ```
 3. 设备 A 的流量经代理时自动应用 `login_500`，设备 B 透传
 4. 用例结束后调用 `deactivate(client_ip="192.168.1.101")` 清理
@@ -77,7 +77,7 @@ beacon-proxy add-rule "/api/login" --id login_500 --status 500 \
 ```bash
 curl -X POST http://127.0.0.1:8765/api/activate \
   -H "Content-Type: application/json" \
-  -d '{"device_id":"device_A","client_ip":"192.168.1.101","rule_ids":["login_500"]}'
+  -d '{"scenario_id":"scenario_A","client_ip":"192.168.1.101","rule_ids":["login_500"]}'
 ```
 
 ---
@@ -190,12 +190,12 @@ beacon-proxy start --with-api --port 8080 --api-port 8765
 ### 4.2 浏览器 / Playwright
 
 ```javascript
-// Playwright 配置代理并注入 X-Device-ID
+// Playwright 配置代理并注入 X-Scenario-ID
 const browser = await chromium.launch({
   proxy: { server: 'http://127.0.0.1:8080' }
 });
 const context = await browser.newContext({
-  extraHTTPHeaders: { 'X-Device-ID': 'device_A' }
+  extraHTTPHeaders: { 'X-Scenario-ID': 'scenario_A' }
 });
 ```
 
@@ -205,7 +205,7 @@ const context = await browser.newContext({
 # 用例前：激活设备
 curl -X POST http://127.0.0.1:8765/api/activate \
   -H "Content-Type: application/json" \
-  -d '{"device_id":"device_A","client_ip":"<模拟器IP>"}'
+  -d '{"scenario_id":"scenario_A","client_ip":"<模拟器IP>"}'
 
 # 配置模拟器 HTTP 代理为 宿主机IP:8080
 

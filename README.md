@@ -52,7 +52,7 @@ beacon-proxy start
 beacon-proxy add-rule "/api/login" --status 500 --body '{"error":"server_error"}'
 
 # 添加域名重写（A 域名 -> B 域名）
-beacon-proxy add-rewrite api.prod.example.com api.staging.example.com -d device_A
+beacon-proxy add-rewrite api.prod.example.com api.staging.example.com -d scenario_A
 
 # 列出规则
 beacon-proxy list-rules
@@ -75,45 +75,45 @@ beacon-proxy mcp
 
 ### 多设备与规则复用（服务化部署）
 
-当 `LLM_PROXY_RULES` 指向目录（如 `rules/`）时，使用 **definitions + devices** 结构，支持规则复用：
+当 `LLM_PROXY_RULES` 指向目录（如 `rules/`）时，使用 **definitions + scenarios** 结构，支持规则复用：
 
 ```
 rules/
 ├── definitions/       # 可复用规则定义
 │   ├── login_500.yaml
 │   └── cart_empty.yaml
-└── devices/           # 设备引用的规则
-    ├── device_A.yaml  # rule_ids: [login_500]
-    └── device_B.yaml  # rule_ids: [login_500, cart_empty]
+└── scenarios/         # 场景引用的规则
+    ├── scenario_A.yaml  # rule_ids: [login_500]
+    └── scenario_B.yaml  # rule_ids: [login_500, cart_empty]
 ```
 
-设备通过请求头 `X-Device-ID` 识别（可通过 `BEACON_PROXY_DEVICE_ID_HEADER` 自定义）。
+场景通过请求头 `X-Scenario-ID` 识别（可通过 `BEACON_PROXY_SCENARIO_ID_HEADER` 自定义）。
 
 ```bash
 # 使用 rules 目录
 export LLM_PROXY_RULES=rules
 beacon-proxy start
 
-# 定义规则并绑定到设备
-beacon-proxy add-rule "/api/login" --id login_500 --status 500 --device-id device_A
+# 定义规则并绑定到场景
+beacon-proxy add-rule "/api/login" --id login_500 --status 500 --scenario-id scenario_A
 
 # 定义规则（不绑定）
 beacon-proxy add-rule "/api/cart" --id cart_empty --body '[]'
 
-# 将已有规则绑定到另一设备
-beacon-proxy bind-rule login_500 device_B
+# 将已有规则绑定到另一场景
+beacon-proxy bind-rule login_500 scenario_B
 
-# 从设备解绑
-beacon-proxy unbind-rule login_500 device_B
+# 从场景解绑
+beacon-proxy unbind-rule login_500 scenario_B
 
 # 列出所有定义
 beacon-proxy list-definitions
 
-# 列出设备规则
-beacon-proxy list-rules --device-id device_A
+# 列出场景规则
+beacon-proxy list-rules --scenario-id scenario_A
 ```
 
-客户端需在请求中带上 `X-Device-ID: device_A` 才会使用该设备的规则。
+客户端需在请求中带上 `X-Scenario-ID: scenario_A` 才会使用该场景的规则。
 
 ### 激活 API（按 IP 动态激活）
 
@@ -132,18 +132,18 @@ beacon-proxy api
 **API 示例：**
 
 ```bash
-# 激活：设备 device_A 的请求来自 IP 192.168.1.101
+# 激活：场景 scenario_A 的请求来自 IP 192.168.1.101
 curl -X POST http://127.0.0.1:8765/api/activate \
   -H "Content-Type: application/json" \
-  -d '{"device_id":"device_A","client_ip":"192.168.1.101","rule_ids":["login_500","cart_empty"]}'
+  -d '{"scenario_id":"scenario_A","client_ip":"192.168.1.101","rule_ids":["login_500","cart_empty"]}'
 
-# 指定 rule_ids 时覆盖 devices/device_A.yaml 的配置；不传则使用设备默认规则
+# 指定 rule_ids 时覆盖 scenarios/scenario_A.yaml 的配置；不传则使用场景默认规则
 
 # 列出激活
 curl http://127.0.0.1:8765/api/activate
 
 # 取消激活
-curl -X DELETE http://127.0.0.1:8765/api/activate/device_A
+curl -X DELETE http://127.0.0.1:8765/api/activate/scenario_A
 curl -X DELETE http://127.0.0.1:8765/api/activate/ip/192.168.1.101
 ```
 

@@ -49,12 +49,12 @@ def add_rule(
     regex: bool = typer.Option(False, "--regex", "-r", help="url_pattern is regex"),
     upstream_host: Optional[str] = typer.Option(None, "--upstream-host", help="Rewrite to this host (A域名->B域名)"),
     upstream_port: Optional[int] = typer.Option(None, "--upstream-port", help="Target port (default 443/80)"),
-    device_id: Optional[str] = typer.Option(None, "--device-id", "-d", help="Bind to device (reuse mode)"),
+    scenario_id: Optional[str] = typer.Option(None, "--scenario-id", "-d", help="Bind to scenario (reuse mode)"),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file or directory path"),
 ) -> None:
     """Add an intercept rule. In reuse mode (rules dir): creates definition, optionally binds to device."""
     manager = _get_manager(rules_file)
-    rules = manager.get_intercept_rules(device_id)
+    rules = manager.get_intercept_rules(scenario_id)
     rid = rule_id or f"rule_{len(rules) + 1}"
     rule = InterceptRule(
         id=rid,
@@ -66,8 +66,8 @@ def add_rule(
         upstream_host=upstream_host,
         upstream_port=upstream_port,
     )
-    manager.add_rule(rule, device_id)
-    target = f" (device={device_id})" if device_id else ""
+    manager.add_rule(rule, scenario_id)
+    target = f" (scenario={scenario_id})" if scenario_id else ""
     typer.echo(f"Added rule {rid}: {url_pattern}{target}")
 
 
@@ -77,12 +77,12 @@ def add_rewrite(
     to_host: str = typer.Argument(..., help="目标域名（B），如 api.staging.example.com"),
     rule_id: Optional[str] = typer.Option(None, "--id", "-i", help="Rule id (default: auto)"),
     port: int = typer.Option(443, "--port", "-p", help="目标端口"),
-    device_id: Optional[str] = typer.Option(None, "--device-id", "-d", help="绑定到设备"),
+    scenario_id: Optional[str] = typer.Option(None, "--scenario-id", "-d", help="绑定到场景"),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file or directory path"),
 ) -> None:
     """添加域名重写规则：将 A 域名的请求代理转发到 B 域名。"""
     manager = _get_manager(rules_file)
-    rules = manager.get_intercept_rules(device_id)
+    rules = manager.get_intercept_rules(scenario_id)
     rid = rule_id or f"rewrite_{len(rules) + 1}"
     rule = InterceptRule(
         id=rid,
@@ -92,20 +92,20 @@ def add_rewrite(
         upstream_port=port,
         use_regex=False,
     )
-    manager.add_rule(rule, device_id)
-    target = f" (device={device_id})" if device_id else ""
+    manager.add_rule(rule, scenario_id)
+    target = f" (scenario={scenario_id})" if scenario_id else ""
     typer.echo(f"Added rewrite {rid}: {from_host} -> {to_host}:{port}{target}")
 
 
 @app.command()
 def remove_rule(
     rule_id: str = typer.Argument(..., help="Rule id to remove"),
-    device_id: Optional[str] = typer.Option(None, "--device-id", "-d", help="Unbind from device only (reuse mode). Omit to delete definition."),
+    scenario_id: Optional[str] = typer.Option(None, "--scenario-id", "-d", help="Unbind from scenario only (reuse mode). Omit to delete definition."),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file or directory path"),
 ) -> None:
     """Remove an intercept rule. With --device-id: unbind from device. Without: delete definition."""
     manager = _get_manager(rules_file)
-    if manager.remove_rule(rule_id, device_id):
+    if manager.remove_rule(rule_id, scenario_id):
         typer.echo(f"Removed rule {rule_id}")
     else:
         typer.echo(f"Rule {rule_id} not found", err=True)
@@ -115,13 +115,13 @@ def remove_rule(
 @app.command()
 def bind_rule(
     rule_id: str = typer.Argument(..., help="Rule id to bind"),
-    device_id: str = typer.Argument(..., help="Device id"),
+    scenario_id: str = typer.Argument(..., help="Scenario id"),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules directory path"),
 ) -> None:
     """Bind a rule definition to a device (reuse mode only)."""
     manager = _get_manager(rules_file)
-    if manager.bind_rule(rule_id, device_id):
-        typer.echo(f"Bound {rule_id} to {device_id}")
+    if manager.bind_rule(rule_id, scenario_id):
+        typer.echo(f"Bound {rule_id} to {scenario_id}")
     else:
         typer.echo(f"Failed: rule {rule_id} not found or not in reuse mode", err=True)
         raise typer.Exit(1)
@@ -130,15 +130,15 @@ def bind_rule(
 @app.command()
 def unbind_rule(
     rule_id: str = typer.Argument(..., help="Rule id to unbind"),
-    device_id: str = typer.Argument(..., help="Device id"),
+    scenario_id: str = typer.Argument(..., help="Scenario id"),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules directory path"),
 ) -> None:
     """Unbind a rule from a device (reuse mode only)."""
     manager = _get_manager(rules_file)
-    if manager.unbind_rule(rule_id, device_id):
-        typer.echo(f"Unbound {rule_id} from {device_id}")
+    if manager.unbind_rule(rule_id, scenario_id):
+        typer.echo(f"Unbound {rule_id} from {scenario_id}")
     else:
-        typer.echo(f"Rule {rule_id} not bound to {device_id}", err=True)
+        typer.echo(f"Rule {rule_id} not bound to {scenario_id}", err=True)
         raise typer.Exit(1)
 
 
@@ -161,16 +161,16 @@ def list_definitions(
 
 @app.command()
 def list_rules(
-    device_id: Optional[str] = typer.Option(None, "--device-id", "-d", help="Device id for per-device rules"),
+    scenario_id: Optional[str] = typer.Option(None, "--scenario-id", "-d", help="Scenario id for per-scenario rules"),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file or directory path"),
 ) -> None:
     """List intercept rules for device (or default)."""
     manager = _get_manager(rules_file)
-    rules = manager.get_intercept_rules(device_id)
+    rules = manager.get_intercept_rules(scenario_id)
     if not rules:
         typer.echo("No rules")
         return
-    header = f" (device={device_id})" if device_id else ""
+    header = f" (scenario={scenario_id})" if scenario_id else ""
     typer.echo(f"Rules{header}:")
     for r in rules:
         desc = f" ({r.description})" if r.description else ""
@@ -184,7 +184,7 @@ def api(
     host: str = typer.Option("127.0.0.1", "--host", "-H", help="API bind address (0.0.0.0 for mobile cert install)"),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file or directory path"),
 ) -> None:
-    """Start activation API server. UI automation calls this to activate device rules by IP."""
+    """Start activation API server. UI automation calls this to activate scenario rules by IP."""
     path = rules_file or os.environ.get("LLM_PROXY_RULES", "rules.yaml")
     env = os.environ.copy()
     env["LLM_PROXY_RULES"] = str(Path(path).absolute())

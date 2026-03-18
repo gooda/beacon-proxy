@@ -17,9 +17,9 @@ class LLMProxyAddon:
     def __init__(self, manager: "ManagementInterface"):
         self.manager = manager
 
-    def _get_device_id(self, flow: "HTTPFlow") -> Optional[str]:
-        """Extract device id from request header."""
-        header = self.manager.get_config().device_id_header
+    def _get_scenario_id(self, flow: "HTTPFlow") -> Optional[str]:
+        """Extract scenario id from request header."""
+        header = self.manager.get_config().scenario_id_header
         return flow.request.headers.get(header)
 
     def _get_client_ip(self, flow: "HTTPFlow") -> Optional[str]:
@@ -38,8 +38,8 @@ class LLMProxyAddon:
         client_ip = self._get_client_ip(flow)
         rules = self.manager.get_intercept_rules_for_client(client_ip) if client_ip else []
         if not rules:
-            device_id = self._get_device_id(flow)
-            rules = self.manager.get_intercept_rules(device_id)
+            scenario_id = self._get_scenario_id(flow)
+            rules = self.manager.get_intercept_rules(scenario_id)
 
         for rule in rules:
             if rule.upstream_host and self._match_url(url, rule):
@@ -54,19 +54,19 @@ class LLMProxyAddon:
                     "url": url,
                     "method": flow.request.method,
                     "path": flow.request.path,
-                    "device_id": self._get_device_id(flow),
+                    "scenario_id": self._get_scenario_id(flow),
                 }
             )
         except Exception:
             pass
 
     def response(self, flow: "HTTPFlow") -> None:
-        """Rewrite response if matched by rule. Activation (by IP) takes precedence over X-Device-ID."""
+        """Rewrite response if matched by rule. Activation (by IP) takes precedence over X-Scenario-ID."""
         client_ip = self._get_client_ip(flow)
         rules = self.manager.get_intercept_rules_for_client(client_ip) if client_ip else []
         if not rules:
-            device_id = self._get_device_id(flow)
-            rules = self.manager.get_intercept_rules(device_id)
+            scenario_id = self._get_scenario_id(flow)
+            rules = self.manager.get_intercept_rules(scenario_id)
         url = flow.request.pretty_url
 
         for rule in rules:

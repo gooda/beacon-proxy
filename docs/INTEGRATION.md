@@ -9,7 +9,7 @@
 | 组件         | 默认端口 | 用途                   |
 | ------------ | -------- | ---------------------- |
 | **代理服务** | 8080     | 流量拦截与改写         |
-| **激活 API** | 8765     | 按 IP 动态绑定设备规则 |
+| **激活 API** | 8765     | 按 IP 动态绑定场景规则 |
 
 **部署方式**：代理与 API 可同机部署，或 API 单独部署（共享 rules 目录）。
 
@@ -19,10 +19,10 @@
 
 ### 2.1 模式 A：浏览器 / 可注入 Header 的客户端
 
-客户端在请求中携带 `X-Device-ID`，代理按 Header 选择规则。
+客户端在请求中携带 `X-Scenario-ID`，代理按 Header 选择规则。
 
 ```
-客户端 --[X-Device-ID: device_A]--> 代理:8080 --> 目标服务
+客户端 --[X-Scenario-ID: scenario_A]--> 代理:8080 --> 目标服务
 ```
 
 **适用**：Web 自动化（Puppeteer/Playwright 可注入 Header）、Postman 等。
@@ -32,9 +32,9 @@
 通过激活 API 将「客户端 IP」与「设备 ID」绑定，代理按 IP 选择规则。
 
 ```
-1. 测试前：调用 POST /api/activate 绑定 IP <-> device_id
+1. 测试前：调用 POST /api/activate 绑定 IP <-> scenario_id
 2. 客户端 --[无 Header]--> 代理:8080 --> 目标服务
-3. 代理根据 client_ip 查找 device_id，应用对应规则
+3. 代理根据 client_ip 查找 scenario_id，应用对应规则
 ```
 
 **适用**：移动端 APP、模拟器、真机等。
@@ -59,24 +59,53 @@ POST /api/activate
 
 | 字段      | 类型     | 必填 | 说明                                               |
 | --------- | -------- | ---- | -------------------------------------------------- |
-| device_id | string   | 是   | 设备 ID，对应 rules/devices/{device_id}.yaml       |
+| scenario_id | string   | 是   | 场景 ID，对应 rules/scenarios/{scenario_id}.yaml       |
 | client_ip | string   | 是   | 客户端 IP（代理看到的连接来源 IP）                 |
-| rule_ids  | string[] | 否   | 规则 ID 列表，覆盖设备默认规则；不传则使用设备配置 |
+| rule_ids  | string[] | 否   | 规则 ID 列表，覆盖场景默认规则；不传则使用场景配置 |
+| rules     | object[] | 否   | 内联规则（APPAUTO），支持 networkMock、networkDomainRewrite。字段：url、status_code、response、upstream_host、upstream_port |
+
+**rules 内联规则字段**（与 rule_ids 二选一或并存）：
+
+| 字段           | 说明                         |
+| -------------- | ---------------------------- |
+| url / url_pattern | 匹配的 URL 或域名           |
+| status_code    | 改写响应状态码               |
+| response / body | Mock 响应体（JSON 字符串）  |
+| upstream_host  | 域名转发目标 host（A->B）   |
+| upstream_port  | 目标端口，默认 443           |
+| id             | 规则 ID，便于清除            |
 
 **请求示例**：
 
 ```json
 {
-  "device_id": "device_A",
+  "scenario_id": "scenario_A",
   "client_ip": "192.168.1.101"
 }
 ```
 
 ```json
 {
-  "device_id": "device_B",
+  "scenario_id": "scenario_B",
   "client_ip": "10.0.0.5",
   "rule_ids": ["login_500", "cart_empty"]
+}
+```
+
+内联规则（APPAUTO 原子操作）：
+
+```json
+{
+  "scenario_id": "udid-xxx",
+  "client_ip": "192.168.1.101",
+  "rules": [
+    {
+      "id": "api_rewrite",
+      "url": "api.prod.example.com",
+      "upstream_host": "api.staging.example.com",
+      "upstream_port": 443
+    }
+  ]
 }
 ```
 
@@ -85,7 +114,7 @@ POST /api/activate
 ```json
 {
   "ok": true,
-  "message": "Activated device device_A for IP 192.168.1.101"
+  "message": "Activated scenario scenario_A for IP 192.168.1.101"
 }
 ```
 
@@ -102,7 +131,7 @@ POST /api/generate
 | 字段        | 类型   | 必填 | 说明                    |
 | ----------- | ------ | ---- | ----------------------- |
 | requirement | string | 是   | 自然语言需求            |
-| device_id   | string | 否   | 设备 ID，默认 `default` |
+| scenario_id   | string | 否   | 场景 ID，默认 `default` |
 | client_ip   | string | 是   | 被测设备 IP，用于激活   |
 
 **支持的需求格式**：
@@ -117,7 +146,7 @@ POST /api/generate
 ```json
 {
   "requirement": "登录失败",
-  "device_id": "device_A",
+  "scenario_id": "scenario_A",
   "client_ip": "192.168.1.101"
 }
 ```
@@ -127,7 +156,7 @@ POST /api/generate
 ```json
 {
   "ok": true,
-  "message": "已生成 1 条规则并激活：device_A -> 192.168.1.101",
+  "message": "已生成 1 条规则并激活：scenario_A -> 192.168.1.101",
   "rule_ids": ["login_500"]
 }
 ```
@@ -137,7 +166,7 @@ POST /api/generate
 取消该设备的所有 IP 绑定。
 
 ```
-DELETE /api/activate/{device_id}
+DELETE /api/activate/{scenario_id}
 ```
 
 **响应**（200）：
@@ -145,7 +174,7 @@ DELETE /api/activate/{device_id}
 ```json
 {
   "ok": true,
-  "message": "Deactivated device device_A"
+  "message": "Deactivated scenario scenario_A"
 }
 ```
 
@@ -182,12 +211,12 @@ GET /api/activate
 
 ```json
 {
-  "ip_to_device": {
-    "192.168.1.101": "device_A",
-    "10.0.0.5": "device_B"
+  "ip_to_scenario": {
+    "192.168.1.101": "scenario_A",
+    "10.0.0.5": "scenario_B"
   },
-  "device_rule_overrides": {
-    "device_B": ["login_500", "cart_empty"]
+  "scenario_rule_overrides": {
+    "scenario_B": ["login_500", "cart_empty"]
   }
 }
 ```
@@ -203,7 +232,7 @@ GET /api/activate/ip/{client_ip}
 ```json
 {
   "client_ip": "192.168.1.101",
-  "device_id": "device_A",
+  "scenario_id": "scenario_A",
   "rule_count": 1,
   "rules": [{ "id": "login_500", "url_pattern": "/api/login" }]
 }
@@ -219,24 +248,24 @@ GET /api/activate/ip/{client_ip}
 
 ```text
 1. 获取被测设备/模拟器 IP（如 192.168.1.101）
-2. 确定要 mock 的场景（如 device_A：登录失败）
-3. POST /api/activate 绑定 IP 与 device_A
+2. 确定要 mock 的场景（如 scenario_A：登录失败）
+3. POST /api/activate 绑定 IP 与 scenario_A
 4. 配置被测 APP 使用代理 192.168.x.x:8080
 5. 执行自动化用例
 6. 用例结束：DELETE /api/activate/ip/192.168.1.101（可选，清理）
 ```
 
-### 4.2 浏览器场景（X-Device-ID）
+### 4.2 浏览器场景（X-Scenario-ID）
 
 ```text
 1. 配置浏览器/Playwright 使用代理 127.0.0.1:8080
-2. 注入请求头 X-Device-ID: device_A
-3. 执行用例，代理自动应用 device_A 的规则
+2. 注入请求头 X-Scenario-ID: scenario_A
+3. 执行用例，代理自动应用 scenario_A 的规则
 ```
 
 ---
 
-## 5. 规则与设备配置
+## 5. 规则与场景配置
 
 ### 5.1 目录结构（rules 目录模式）
 
@@ -245,9 +274,9 @@ rules/
 ├── definitions/          # 可复用规则定义
 │   ├── login_500.yaml
 │   └── cart_empty.yaml
-├── devices/               # 设备绑定的规则
-│   ├── device_A.yaml
-│   └── device_B.yaml
+├── scenarios/            # 场景绑定的规则
+│   ├── scenario_A.yaml
+│   └── scenario_B.yaml
 └── activations.yaml       # 激活映射（API 写入，持久化）
 ```
 
@@ -278,10 +307,10 @@ use_regex: false
 
 ```bash
 # 添加域名重写：api.prod.example.com -> api.staging.example.com
-beacon-proxy add-rewrite api.prod.example.com api.staging.example.com --device-id device_A
+beacon-proxy add-rewrite api.prod.example.com api.staging.example.com --scenario-id scenario_A
 
 # 指定端口
-beacon-proxy add-rewrite api.prod.example.com api.staging.example.com --port 443 -d device_A
+beacon-proxy add-rewrite api.prod.example.com api.staging.example.com --port 443 -d scenario_A
 ```
 
 **通用 add-rule**：
@@ -289,7 +318,7 @@ beacon-proxy add-rewrite api.prod.example.com api.staging.example.com --port 443
 ```bash
 beacon-proxy add-rule "api.prod.example.com" --id api_rewrite \
   --upstream-host api.staging.example.com --upstream-port 443 \
-  --device-id device_A
+  --scenario-id scenario_A
 ```
 
 **YAML 定义**：
@@ -304,11 +333,11 @@ upstream_port: 443
 use_regex: false
 ```
 
-**MCP 工具**：`add_domain_rewrite(from_host, to_host, port=443, device_id=None)`
+**MCP 工具**：`add_domain_rewrite(from_host, to_host, port=443, scenario_id=None)`
 
-设备绑定该规则后，访问 `https://api.prod.example.com/xxx` 的请求会被代理转发到 `https://api.staging.example.com/xxx`。
+场景绑定该规则后，访问 `https://api.prod.example.com/xxx` 的请求会被代理转发到 `https://api.staging.example.com/xxx`。
 
-### 5.4 设备配置格式
+### 5.4 场景配置格式
 
 ```yaml
 rule_ids:
@@ -325,7 +354,7 @@ overrides: {} # 可选，对某规则的字段覆盖
 | ----------------------------- | ------------------ | ----------- |
 | LLM_PROXY_RULES               | 规则文件或目录路径 | rules.yaml  |
 | BEACON_PROXY_CONFDIR          | 证书存储目录       | ~/.mitmproxy |
-| BEACON_PROXY_DEVICE_ID_HEADER | 设备 ID 请求头名   | X-Device-ID |
+| BEACON_PROXY_SCENARIO_ID_HEADER | 场景 ID 请求头名   | X-Scenario-ID |
 
 ---
 
@@ -464,12 +493,12 @@ beacon-proxy start --ssl-insecure --with-api
 # 根据需求生成并激活（一步完成）
 curl -X POST http://127.0.0.1:8765/api/generate \
   -H "Content-Type: application/json" \
-  -d '{"requirement":"登录失败","device_id":"device_A","client_ip":"192.168.1.101"}'
+  -d '{"requirement":"登录失败","scenario_id":"scenario_A","client_ip":"192.168.1.101"}'
 
 # 激活
 curl -X POST http://127.0.0.1:8765/api/activate \
   -H "Content-Type: application/json" \
-  -d '{"device_id":"device_A","client_ip":"192.168.1.101"}'
+  -d '{"scenario_id":"scenario_A","client_ip":"192.168.1.101"}'
 
 # 查询
 curl http://127.0.0.1:8765/api/activate/ip/192.168.1.101
@@ -485,9 +514,9 @@ import requests
 
 API_BASE = "http://127.0.0.1:8765"
 
-def activate(device_id: str, client_ip: str, rule_ids: list | None = None):
+def activate(scenario_id: str, client_ip: str, rule_ids: list | None = None):
     r = requests.post(f"{API_BASE}/api/activate", json={
-        "device_id": device_id,
+        "scenario_id": scenario_id,
         "client_ip": client_ip,
         "rule_ids": rule_ids,
     })
@@ -500,7 +529,7 @@ def deactivate_ip(client_ip: str):
     return r.json()
 
 # 用例前
-activate("device_A", "192.168.1.101")
+activate("scenario_A", "192.168.1.101")
 # 执行自动化...
 # 用例后
 deactivate_ip("192.168.1.101")
@@ -511,12 +540,12 @@ deactivate_ip("192.168.1.101")
 ```javascript
 const API_BASE = "http://127.0.0.1:8765";
 
-async function activate(deviceId, clientIp, ruleIds = null) {
+async function activate(scenarioId, clientIp, ruleIds = null) {
   const res = await fetch(`${API_BASE}/api/activate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      device_id: deviceId,
+      scenario_id: scenarioId,
       client_ip: clientIp,
       rule_ids: ruleIds,
     }),
@@ -541,14 +570,14 @@ async function deactivateByIp(clientIp) {
 | HTTP 状态 | 说明                                   |
 | --------- | -------------------------------------- |
 | 200       | 成功                                   |
-| 404       | 资源不存在（如未激活的 IP/设备）       |
+| 404       | 资源不存在（如未激活的 IP/场景）       |
 | 422       | 请求体校验失败（缺必填字段、类型错误） |
 | 500       | 服务端异常                             |
 
 **约定**：
 
 - `client_ip` 必须是代理连接时看到的来源 IP，通常为被测设备在代理所在网络的 IP。
-- 同一 IP 只能绑定一个设备，重复激活会覆盖。
+- 同一 IP 只能绑定一个场景，重复激活会覆盖。
 - 激活信息持久化到 `activations.yaml`，代理重启后仍生效。
 
 ---
@@ -558,9 +587,9 @@ async function deactivateByIp(clientIp) {
 **CLI**：用于规则管理、服务启动，适合脚本与 CI。
 
 ```bash
-beacon-proxy add-rule "/api/login" --id login_500 --status 500 --device-id device_A
-beacon-proxy add-rewrite api.prod.example.com api.staging.example.com -d device_A
-beacon-proxy list-rules --device-id device_A
+beacon-proxy add-rule "/api/login" --id login_500 --status 500 --scenario-id scenario_A
+beacon-proxy add-rewrite api.prod.example.com api.staging.example.com -d scenario_A
+beacon-proxy list-rules --scenario-id scenario_A
 beacon-proxy start --with-api --rules rules
 ```
 
