@@ -181,7 +181,7 @@ def list_rules(
 @app.command()
 def api(
     port: int = typer.Option(8765, "--port", "-p", help="API server port"),
-    host: str = typer.Option("127.0.0.1", "--host", "-H", help="API bind address (0.0.0.0 for mobile cert install)"),
+    host: str = typer.Option("0.0.0.0", "--host", "-H", help="API bind address (0.0.0.0=remote access, 127.0.0.1=local only)"),
     rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file or directory path"),
 ) -> None:
     """Start activation API server. UI automation calls this to activate scenario rules by IP."""
@@ -190,6 +190,7 @@ def api(
     env["LLM_PROXY_RULES"] = str(Path(path).absolute())
     try:
         from llm_proxy.api_server import run_api_server
+        typer.echo(f"规则编辑器: http://<本机IP>:{port}/rules")
         typer.echo(f"Certificate install: http://{host}:{port}/certificate")
         run_api_server(host=host, port=port)
     except ImportError as e:
@@ -217,7 +218,7 @@ def start(
     port: int = typer.Option(8080, "--port", "-p", help="Proxy port"),
     with_api: bool = typer.Option(False, "--with-api", help="Also start activation API server"),
     api_port: int = typer.Option(8765, "--api-port", help="API server port (when --with-api)"),
-    api_host: str = typer.Option("127.0.0.1", "--api-host", help="API bind address (use 0.0.0.0 for mobile cert install)"),
+    api_host: str = typer.Option("0.0.0.0", "--api-host", help="API bind address (0.0.0.0=remote access, 127.0.0.1=local only)"),
     ssl_insecure: bool = typer.Option(
         False, "--ssl-insecure", "-k",
         help="Skip upstream server cert verification (for IP-direct/HTTPDNS connections)",
@@ -246,8 +247,9 @@ def start(
             run_api_server(host=api_host, port=api_port)
         t = threading.Thread(target=run_api, daemon=True)
         t.start()
-        typer.echo(f"API server started at http://{api_host}:{api_port}")
-        typer.echo(f"Certificate install: http://{api_host}:{api_port}/certificate")
+        typer.echo(f"API server: http://{api_host}:{api_port}")
+        typer.echo(f"规则编辑器: http://<本机IP>:{api_port}/rules")
+        typer.echo(f"证书下载: http://<本机IP>:{api_port}/certificate")
 
     addon_path = Path(__file__).parent / "run_addon.py"
     cmd = ["mitmdump", "-s", str(addon_path), "-p", str(port)]

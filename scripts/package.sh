@@ -56,7 +56,15 @@ beacon-proxy start --with-api --port 8080 --api-port 8765 --api-host 0.0.0.0 --s
 ## 端口
 
 - 8080: 代理
-- 8765: 激活 API / 证书下载
+- 8765: 激活 API / 证书下载 / **规则编辑器**
+
+## 远程访问
+
+默认 `--api-host 0.0.0.0`，可从其他机器访问：
+- 规则编辑器: http://<服务器IP>:8765/rules
+- 证书下载: http://<服务器IP>:8765/certificate
+
+若仅本机访问，启动时加 `--api-host 127.0.0.1`。
 
 ## 证书
 
