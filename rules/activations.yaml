@@ -1,5 +1,5 @@
 ip_to_scenario:
-  192.168.1.101: scenario_A
+  192.168.50.124: scenario_A
 scenario_rule_overrides:
-  scenario_A:
+  49b5ebfc036d42ff3922fefb645e696ccf5ab1c2:
   - login_500

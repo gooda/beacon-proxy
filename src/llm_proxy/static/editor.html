@@ -50,6 +50,22 @@
       background: var(--bg-panel); border-bottom: 1px solid var(--border);
     }
     .header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; color: var(--text); }
+    .header-tabs {
+      display: flex; gap: 0; margin: 0 var(--space-xl);
+    }
+    .header-tabs button {
+      padding: var(--space-sm) var(--space-lg);
+      font-size: 0.9375rem; font-weight: 500;
+      background: transparent; color: var(--text-muted);
+      border: 1px solid transparent; border-bottom-color: var(--border);
+      cursor: pointer; transition: all 0.15s var(--ease-out);
+    }
+    .header-tabs button:hover { color: var(--accent); }
+    .header-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .view-config { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+    .view-config.hidden { display: none; }
+    .view-apply { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+    .view-apply.hidden { display: none; }
     .header .btns { display: flex; gap: var(--space-sm); }
     .btn {
       padding: var(--space-sm) var(--space-md);
@@ -142,24 +158,30 @@
     .form-tabs button:hover { color: var(--accent); border-color: var(--accent-muted); }
     .form-tabs button.active { background: var(--bg-hover); color: var(--accent); border-color: var(--accent); }
     .form-actions { margin-top: var(--space-xl); display: flex; gap: var(--space-sm); }
-    .activation-list { margin-top: var(--space-md); }
-    .activation-item {
-      display: flex; align-items: center; justify-content: space-between; gap: var(--space-md);
-      padding: var(--space-md); margin: var(--space-sm) 0;
-      background: var(--bg); border: 1px solid var(--border);
-      border-left: 2px solid var(--warning);
-      font-size: 0.9375rem;
-    }
-    .activation-item .ip-scenario { font-family: var(--font-mono); font-size: 0.875rem; }
-    .footer {
+    .activation-panel {
       flex-shrink: 0;
-      padding: var(--space-lg) var(--space-xl);
+      padding: var(--space-xl);
       border-top: 1px solid var(--border);
-      background: var(--bg-panel);
+      background: var(--bg);
     }
-    .footer h3 { margin: 0 0 var(--space-md); font-size: 0.75rem; font-weight: 600; color: var(--text-muted); }
-    .footer h3::before { content: "[ "; }
-    .footer h3::after { content: " ]"; }
+    .activation-panel h3 { margin: 0 0 var(--space-lg); font-size: 0.875rem; font-weight: 600; color: var(--text-muted); }
+    .activation-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: var(--space-md);
+    }
+    .activation-card {
+      padding: var(--space-lg);
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      transition: all 0.15s var(--ease-out);
+    }
+    .activation-card:hover { border-color: var(--accent-muted); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+    .activation-card .ip { font-family: var(--font-mono); font-size: 0.9375rem; font-weight: 500; color: var(--accent); }
+    .activation-card .scenario { font-size: 0.875rem; color: var(--text-muted); margin-top: var(--space-xs); }
+    .activation-card .actions { margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px solid var(--border); }
+    .activation-card .btn { width: 100%; }
     .msg {
       padding: var(--space-md); margin: var(--space-md) 0;
       font-size: 0.875rem; border-radius: var(--radius-sm);
@@ -212,12 +234,17 @@
   <div class="container">
     <div class="header">
       <h1>Beacon Proxy 规则编辑器</h1>
+      <div class="header-tabs">
+        <button id="tab-config" class="active" onclick="switchView('config')">规则配置</button>
+        <button id="tab-apply" onclick="switchView('apply')">规则应用</button>
+      </div>
       <div class="btns">
         <button class="btn btn-ghost" onclick="refresh()">刷新</button>
         <a href="/certificate" class="btn btn-ghost">证书</a>
       </div>
     </div>
-    <div class="main">
+    <div id="view-config" class="view-config">
+      <div class="main">
       <div class="panel">
         <h3>场景</h3>
         <div id="scenario-list"></div>
@@ -270,11 +297,14 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
-    <div class="footer">
-      <h3>激活状态</h3>
-      <div id="activation-list" class="activation-list"></div>
-      <button class="btn-add" onclick="showActivateModal()">+ 激活场景</button>
+    <div id="view-apply" class="view-apply hidden">
+      <div class="activation-panel" style="flex:1; overflow-y:auto;">
+        <h3>规则应用</h3>
+        <div id="activation-list" class="activation-grid"></div>
+        <button class="btn-add" onclick="showActivateModal()" style="margin-top: var(--space-lg);">+ 激活场景</button>
+      </div>
     </div>
   </div>
 
@@ -319,6 +349,14 @@
     let currentScenario = null;
     let editingRuleId = null;
     let formMode = 'mock';
+
+    function switchView(view) {
+      const isConfig = view === 'config';
+      document.getElementById('view-config').classList.toggle('hidden', !isConfig);
+      document.getElementById('view-apply').classList.toggle('hidden', isConfig);
+      document.getElementById('tab-config').classList.toggle('active', isConfig);
+      document.getElementById('tab-apply').classList.toggle('active', !isConfig);
+    }
 
     function formatApiError(err) {
       if (Array.isArray(err.detail)) {
@@ -393,18 +431,21 @@
         const ips = acts.ip_to_scenario || {};
         const el = document.getElementById('activation-list');
         if (Object.keys(ips).length === 0) {
-          el.innerHTML = '<div class="empty"><strong>暂无激活</strong><br>测试前调用 API 或点击下方按钮，将 IP 与场景绑定</div>';
+          el.innerHTML = '<div class="empty" style="grid-column: 1/-1;"><strong>暂无激活</strong><br>测试前调用 API 或点击下方按钮，将 IP 与场景绑定</div>';
           return;
         }
         el.innerHTML = Object.entries(ips).map(([ip, sid]) => {
           const ipAttr = escapeAttr(ip);
-          return `<div class="activation-item">
-            <span class="ip-scenario">${escapeHtml(ip)} → ${escapeHtml(sid)}</span>
-            <button class="btn btn-danger" data-ip="${ipAttr}" onclick="deactivateIp(this.dataset.ip)">取消</button>
+          return `<div class="activation-card">
+            <div class="ip">${escapeHtml(ip)}</div>
+            <div class="scenario">→ ${escapeHtml(sid)}</div>
+            <div class="actions">
+              <button class="btn btn-danger" data-ip="${ipAttr}" onclick="deactivateIp(this.dataset.ip)">取消激活</button>
+            </div>
           </div>`;
         }).join('');
       } catch (e) {
-        document.getElementById('activation-list').innerHTML = '<div class="msg err">' + escapeHtml(e.message) + '</div>';
+        document.getElementById('activation-list').innerHTML = '<div class="msg err" style="grid-column: 1/-1;">' + escapeHtml(e.message) + '</div>';
       }
     }
 
