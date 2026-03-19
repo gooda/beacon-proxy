@@ -199,21 +199,6 @@ def api(
 
 
 @app.command()
-def mcp(
-    rules_file: Optional[str] = typer.Option(None, "--rules", help="Rules file path"),
-) -> None:
-    """Start MCP server for interactive debugging. Requires: pip install mcp"""
-    path = rules_file or os.environ.get("LLM_PROXY_RULES", "rules.yaml")
-    os.environ["LLM_PROXY_RULES"] = str(Path(path).absolute())
-    try:
-        from llm_proxy.mcp_server import run_mcp_server
-        run_mcp_server()
-    except ImportError as e:
-        typer.echo("MCP not installed. Run: pip install 'beacon-proxy[mcp]' or pip install mcp", err=True)
-        raise typer.Exit(1) from e
-
-
-@app.command()
 def start(
     port: int = typer.Option(8080, "--port", "-p", help="Proxy port"),
     with_api: bool = typer.Option(False, "--with-api", help="Also start activation API server"),

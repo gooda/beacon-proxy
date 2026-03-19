@@ -11,8 +11,5 @@ pyyaml>=6.0
 uvicorn>=0.24
 fastapi>=0.104
 
-# 可选: MCP 支持
-# mcp>=1.0
-
 # 可选: 大模型解析
 # openai>=1.0

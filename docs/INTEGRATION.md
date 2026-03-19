@@ -333,7 +333,7 @@ upstream_port: 443
 use_regex: false
 ```
 
-**MCP 工具**：`add_domain_rewrite(from_host, to_host, port=443, scenario_id=None)`
+**CLI**：`beacon-proxy add-rewrite <from_host> <to_host> -p 443 -d <scenario_id>`
 
 场景绑定该规则后，访问 `https://api.prod.example.com/xxx` 的请求会被代理转发到 `https://api.staging.example.com/xxx`。
 
@@ -582,7 +582,7 @@ async function deactivateByIp(clientIp) {
 
 ---
 
-## 10. 附录：CLI 与 MCP
+## 10. 附录：CLI 与 Skills
 
 **CLI**：用于规则管理、服务启动，适合脚本与 CI。
 
@@ -593,4 +593,4 @@ beacon-proxy list-rules --scenario-id scenario_A
 beacon-proxy start --with-api --rules rules
 ```
 
-**MCP**：供 Cursor 等 AI 客户端调用，支持 `generate_from_requirement`、`add_domain_rewrite`（域名重写）、`add_rule`、`activate`、`deactivate` 等工具，用于交互式调试。
+**Skills**：供 Cursor 等 AI 客户端使用，依据 `skills/beacon-proxy/SKILL.md` 通过 CLI 或 REST API 完成规则配置、激活、域名重写等操作。

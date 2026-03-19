@@ -13,7 +13,7 @@
 | **响应 Mock** | 匹配 URL 后改写状态码、响应体 |
 | **域名重写** | 将 A 域名请求转发到 B 域名（A→B 代理） |
 | **场景与激活** | 按场景组织规则，支持按 IP 动态激活 |
-| **多入口** | CLI、REST API、MCP、规则编辑器 |
+| **多入口** | CLI、REST API、规则编辑器、Skills |
 
 ---
 
@@ -23,8 +23,6 @@
 
 ```bash
 pip install -e .
-# MCP 支持（可选）
-pip install "beacon-proxy[mcp]"
 ```
 
 ### 快速启动
@@ -50,8 +48,8 @@ beacon-proxy start --with-api
 |------|------|-----------|
 | **CLI** | 脚本、CI、命令行管理规则 | `beacon-proxy <cmd>` |
 | **REST API** | 外部系统集成、激活、规则 CRUD | `http://host:8765/api/*` |
-| **MCP** | AI 客户端（Cursor 等）交互式调试 | `beacon-proxy mcp` |
 | **规则编辑器** | 可视化管理场景、规则、激活 | `http://host:8765/rules` |
+| **Skills** | AI 客户端（Cursor 等）依据 skill 使用 CLI/REST | `skills/beacon-proxy/` |
 
 ---
 
@@ -154,7 +152,6 @@ overrides: {}
 | `beacon-proxy list-definitions` | 列出所有定义 |
 | `beacon-proxy bind-rule <rule_id> <scenario_id>` | 绑定规则到场景 |
 | `beacon-proxy unbind-rule <rule_id> <scenario_id>` | 从场景解绑 |
-| `beacon-proxy mcp` | 启动 MCP 服务 |
 
 **常用选项**：
 
@@ -287,5 +284,5 @@ HTTPS 拦截需在设备上安装 CA 证书：
 | 文档 | 说明 |
 |------|------|
 | [INTEGRATION.md](INTEGRATION.md) | 外部系统集成规范、API 详细说明 |
-| [AI_CODING_GUIDE.md](AI_CODING_GUIDE.md) | AI 编程场景、MCP 使用 |
+| [AI_CODING_GUIDE.md](AI_CODING_GUIDE.md) | AI 编程场景、Skills 使用 |
 | [rule-editor-plan.md](plans/rule-editor-plan.md) | 规则编辑器方案 |

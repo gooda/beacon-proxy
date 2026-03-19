@@ -1,16 +1,15 @@
 # Beacon Proxy
 
-基于 mitmproxy 的代理服务，用于 UI 自动化测试中的请求拦截与改写。支持 CLI（自动化）与 MCP（交互式调试）。
+基于 mitmproxy 的代理服务，用于 UI 自动化测试中的请求拦截与改写。支持 CLI、REST API 与 Skills（AI 编程）。
 
 - **工具说明**：[TOOL_GUIDE.md](docs/TOOL_GUIDE.md) — 安装、配置、入口、命令与 API 参考
 - **外部系统集成**：[使用规范 (INTEGRATION.md)](docs/INTEGRATION.md) — REST API、调用流程与示例
-- **AI 编程场景**：[AI Coding 使用指南 (AI_CODING_GUIDE.md)](docs/AI_CODING_GUIDE.md) — MCP 集成、对话式 mock、TDD 等
+- **AI 编程场景**：[AI Coding 使用指南 (AI_CODING_GUIDE.md)](docs/AI_CODING_GUIDE.md) — Skills、对话式 mock、TDD 等
 
 ## 安装
 
 ```bash
 pip install -e .
-# MCP 支持（可选）: pip install "beacon-proxy[mcp]"
 ```
 
 ### Agent Skills（Cursor / Claude Code 等）
@@ -77,14 +76,6 @@ beacon-proxy list-rules
 # 删除规则
 beacon-proxy remove-rule rule_1
 ```
-
-### MCP
-
-```bash
-beacon-proxy mcp
-```
-
-需先安装 `pip install mcp`。在 Cursor 等支持 MCP 的客户端中配置该服务器，大模型可调用 `add_rule`、`add_domain_rewrite`、`remove_rule`、`list_rules` 等工具。
 
 ### 规则文件
 
