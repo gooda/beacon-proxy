@@ -45,7 +45,6 @@ pip install -r requirements.txt && pip install .
 ./scripts/start.sh
 ```
 
-
 ## 使用
 
 ### 快速启动
@@ -152,9 +151,14 @@ curl -X POST http://127.0.0.1:8765/api/activate \
 # 列出激活
 curl http://127.0.0.1:8765/api/activate
 
-# 取消激活
+# 取消激活（按场景，清除该场景下所有 IP）
 curl -X DELETE http://127.0.0.1:8765/api/activate/scenario_A
+
+# 取消激活（按 IP，仅清除指定设备）
 curl -X DELETE http://127.0.0.1:8765/api/activate/ip/192.168.1.101
+
+# 取消所有激活（清除全部 IP 绑定，代理恢复透传状态）
+curl -X DELETE http://127.0.0.1:8765/api/activate
 ```
 
 **持久化**：激活信息保存在 `activations.yaml`（与 rules 同目录），重启代理后仍生效。
