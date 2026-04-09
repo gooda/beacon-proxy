@@ -138,6 +138,16 @@ def deactivate_by_ip(client_ip: str) -> ActivateResponse:
     raise HTTPException(status_code=404, detail=f"IP {client_ip} not found in activations")
 
 
+@app.delete("/api/activate", response_model=ActivateResponse)
+def deactivate_all() -> ActivateResponse:
+    """Deactivate all activations. Clears all IP-scenario bindings and rule overrides."""
+    manager = _get_manager()
+    count = manager.deactivate_all()
+    if count > 0:
+        return ActivateResponse(ok=True, message=f"Deactivated all activations ({count} IPs cleared)")
+    return ActivateResponse(ok=True, message="No activations to clear")
+
+
 @app.get("/api/activate")
 def list_activations() -> dict:
     """List all activations (ip_to_scenario, scenario_rule_overrides)."""

@@ -243,6 +243,18 @@ class FileBasedManager:
             self._save_activations(acts)
         return changed
 
+    def deactivate_all(self) -> int:
+        """Deactivate all activations. Returns count of cleared IP bindings."""
+        acts = self._load_activations()
+        count = len(acts.ip_to_scenario)
+        if count == 0 and not acts.scenario_rule_overrides and not self._scenario_inline_rules:
+            return 0
+        acts.ip_to_scenario.clear()
+        acts.scenario_rule_overrides.clear()
+        self._scenario_inline_rules.clear()
+        self._save_activations(acts)
+        return count
+
     def list_activations(self) -> Dict[str, Any]:
         """List all activations."""
         acts = self._load_activations()
