@@ -10,9 +10,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
-from llm_proxy.generator import generate_rules_from_requirement
+from llm_proxy.generator import generate_network_condition, generate_rules_from_requirement
 from llm_proxy.manager.file_based import FileBasedManager
-from llm_proxy.models import InterceptRule, ProxyConfig
+from llm_proxy.models import InterceptRule, NetworkCondition, ProxyConfig
 
 app = FastAPI(title="Beacon Proxy API", version="0.1.0")
 
@@ -30,6 +30,9 @@ def _inline_rule_to_intercept_rule(r: Dict[str, Any]) -> InterceptRule:
         use_regex=r.get("use_regex", False),
         upstream_host=r.get("upstream_host"),
         upstream_port=r.get("upstream_port"),
+        delay_ms=r.get("delay_ms"),
+        throttle_kbps=r.get("throttle_kbps"),
+        packet_loss_rate=r.get("packet_loss_rate"),
     )
 
 
@@ -43,6 +46,15 @@ def _get_manager() -> FileBasedManager:
     return FileBasedManager(path, ProxyConfig())
 
 
+class NetworkConditionInline(BaseModel):
+    """Inline network condition for activate request."""
+
+    airplane_mode: bool = False
+    delay_ms: Optional[int] = Field(default=None, ge=0, le=60000)
+    throttle_kbps: Optional[int] = Field(default=None, ge=0, le=102400)
+    packet_loss_rate: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
 class ActivateRequest(BaseModel):
     scenario_id: str
     client_ip: str
@@ -50,6 +62,10 @@ class ActivateRequest(BaseModel):
     rules: Optional[List[Dict[str, Any]]] = Field(
         default=None,
         description="Inline rules (APPAUTO). url/url_pattern, status_code, response/body, upstream_host, upstream_port",
+    )
+    network_condition: Optional[NetworkConditionInline] = Field(
+        default=None,
+        description="Network condition for this IP (weak network, airplane mode). Optional.",
     )
 
 
@@ -75,18 +91,31 @@ class GenerateResponse(BaseModel):
 @app.post("/api/generate", response_model=GenerateResponse)
 def generate_and_activate(req: GenerateRequest) -> GenerateResponse:
     """
-    根据代理需求自动生成规则、写入服务并激活。
+    根据代理需求自动生成规则或网络条件、写入服务并激活。
 
     支持需求格式：
+    - 网络条件：飞行模式、断网、弱网、弱网3G、弱网4G、高延迟、慢网
     - 预设：登录失败、购物车空
     - X 返回 Y：如「登录 返回 500」
     - X 空：如「购物车 空」
     - 直接 URL：/api/login
     """
     manager = _get_manager()
+
+    # 优先尝试网络条件
+    condition = generate_network_condition(req.requirement)
+    if condition:
+        manager.set_network_condition(req.client_ip, condition)
+        desc = req.requirement.strip()
+        return GenerateResponse(
+            ok=True,
+            message=f"已设置网络条件「{desc}」-> {req.client_ip}",
+            rule_ids=[],
+        )
+
     rules = generate_rules_from_requirement(req.requirement)
     if not rules:
-        raise HTTPException(status_code=400, detail="无法解析需求，请使用：登录失败、购物车空、X 返回 Y、X 空 或 /api/xxx")
+        raise HTTPException(status_code=400, detail="无法解析需求，请使用：飞行模式、弱网、登录失败、购物车空、X 返回 Y、X 空 或 /api/xxx")
 
     rule_ids: List[str] = []
     for rule in rules:
@@ -104,16 +133,38 @@ def generate_and_activate(req: GenerateRequest) -> GenerateResponse:
 @app.post("/api/activate", response_model=ActivateResponse)
 def activate(req: ActivateRequest) -> ActivateResponse:
     """Activate scenario rules for client IP. UI automation calls this before running tests.
-    Supports rule_ids (from definitions) and rules (inline from APPAUTO, incl. upstream_host for domain rewrite).
+    Supports rule_ids (from definitions), rules (inline from APPAUTO), and network_condition (weak network / airplane mode).
     """
     manager = _get_manager()
     inline_rules: Optional[List[InterceptRule]] = None
     if req.rules:
         inline_rules = [_inline_rule_to_intercept_rule(r) for r in req.rules]
     manager.activate(req.scenario_id, req.client_ip, req.rule_ids, inline_rules)
+
+    # Set network condition if provided
+    if req.network_condition:
+        condition = NetworkCondition(
+            airplane_mode=req.network_condition.airplane_mode,
+            delay_ms=req.network_condition.delay_ms,
+            throttle_kbps=req.network_condition.throttle_kbps,
+            packet_loss_rate=req.network_condition.packet_loss_rate,
+        )
+        manager.set_network_condition(req.client_ip, condition)
+
     rules_desc = f" rule_ids={req.rule_ids}" if req.rule_ids else ""
     if inline_rules:
         rules_desc += f" inline={len(inline_rules)}" if rules_desc else f"inline={len(inline_rules)}"
+    if req.network_condition:
+        nc = req.network_condition
+        if nc.airplane_mode:
+            rules_desc += " network=airplane_mode"
+        else:
+            parts = []
+            if nc.delay_ms: parts.append(f"{nc.delay_ms}ms")
+            if nc.throttle_kbps: parts.append(f"{nc.throttle_kbps}KB/s")
+            if nc.packet_loss_rate: parts.append(f"loss={nc.packet_loss_rate}")
+            if parts:
+                rules_desc += f" network={'+'.join(parts)}"
     return ActivateResponse(
         ok=True,
         message=f"Activated scenario {req.scenario_id} for IP {req.client_ip}" + (f" {rules_desc}" if rules_desc else ""),
@@ -171,6 +222,78 @@ def get_activation_for_ip(client_ip: str) -> dict:
     }
 
 
+# --- 网络条件 API（弱网模拟、飞行模式）---
+
+
+class NetworkConditionRequest(BaseModel):
+    """Set network condition for a client IP."""
+
+    client_ip: str
+    airplane_mode: bool = False
+    delay_ms: Optional[int] = Field(default=None, ge=0, le=60000, description="延迟(ms)")
+    throttle_kbps: Optional[int] = Field(default=None, ge=0, le=102400, description="限速(KB/s)")
+    packet_loss_rate: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="丢包率")
+
+
+class NetworkConditionResponse(BaseModel):
+    ok: bool
+    message: str
+    condition: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/network-condition", response_model=NetworkConditionResponse)
+def set_network_condition(req: NetworkConditionRequest) -> NetworkConditionResponse:
+    """设置客户端 IP 的网络条件（弱网模拟、飞行模式）。"""
+    manager = _get_manager()
+    condition = NetworkCondition(
+        airplane_mode=req.airplane_mode,
+        delay_ms=req.delay_ms,
+        throttle_kbps=req.throttle_kbps,
+        packet_loss_rate=req.packet_loss_rate,
+    )
+    manager.set_network_condition(req.client_ip, condition)
+    cond_dict = condition.model_dump() if hasattr(condition, "model_dump") else condition.dict()
+    return NetworkConditionResponse(ok=True, message=f"Network condition set for {req.client_ip}", condition=cond_dict)
+
+
+@app.get("/api/network-condition")
+def list_network_conditions() -> Dict[str, Any]:
+    """列出所有客户端的网络条件。"""
+    manager = _get_manager()
+    conditions = manager.list_network_conditions()
+    return {ip: (c.model_dump() if hasattr(c, "model_dump") else c.dict()) for ip, c in conditions.items()}
+
+
+@app.get("/api/network-condition/{client_ip}")
+def get_network_condition(client_ip: str) -> Dict[str, Any]:
+    """查询某 IP 的网络条件。"""
+    manager = _get_manager()
+    condition = manager.get_network_condition(client_ip)
+    if not condition:
+        raise HTTPException(status_code=404, detail=f"No network condition for {client_ip}")
+    cond_dict = condition.model_dump() if hasattr(condition, "model_dump") else condition.dict()
+    return {"client_ip": client_ip, **cond_dict}
+
+
+@app.delete("/api/network-condition/{client_ip}", response_model=NetworkConditionResponse)
+def clear_network_condition(client_ip: str) -> NetworkConditionResponse:
+    """清除某 IP 的网络条件。"""
+    manager = _get_manager()
+    if manager.clear_network_condition(client_ip):
+        return NetworkConditionResponse(ok=True, message=f"Cleared network condition for {client_ip}")
+    raise HTTPException(status_code=404, detail=f"No network condition for {client_ip}")
+
+
+@app.delete("/api/network-condition", response_model=NetworkConditionResponse)
+def clear_all_network_conditions() -> NetworkConditionResponse:
+    """清除所有网络条件。"""
+    manager = _get_manager()
+    conditions = manager.list_network_conditions()
+    for ip in list(conditions.keys()):
+        manager.clear_network_condition(ip)
+    return NetworkConditionResponse(ok=True, message=f"Cleared {len(conditions)} network conditions")
+
+
 # --- 规则 CRUD API（编辑器用）---
 
 def _rule_to_dict(r: InterceptRule) -> dict:
@@ -190,6 +313,9 @@ class RuleCreate(BaseModel):
     upstream_host: Optional[str] = None
     upstream_port: Optional[int] = None
     scenario_id: Optional[str] = None
+    delay_ms: Optional[int] = None
+    throttle_kbps: Optional[int] = None
+    packet_loss_rate: Optional[float] = None
 
 
 class RuleUpdate(BaseModel):
@@ -202,6 +328,9 @@ class RuleUpdate(BaseModel):
     use_regex: Optional[bool] = None
     upstream_host: Optional[str] = None
     upstream_port: Optional[int] = None
+    delay_ms: Optional[int] = None
+    throttle_kbps: Optional[int] = None
+    packet_loss_rate: Optional[float] = None
 
 
 class BindRequest(BaseModel):
@@ -264,6 +393,9 @@ def create_rule(req: RuleCreate) -> dict:
         use_regex=req.use_regex,
         upstream_host=req.upstream_host,
         upstream_port=req.upstream_port,
+        delay_ms=req.delay_ms,
+        throttle_kbps=req.throttle_kbps,
+        packet_loss_rate=req.packet_loss_rate,
     )
     manager.add_rule(rule, req.scenario_id)
     return _rule_to_dict(rule)

@@ -2,7 +2,7 @@
 
 from typing import List, Optional, Protocol
 
-from llm_proxy.models import InterceptRule, ProxyConfig, ProxyState
+from llm_proxy.models import InterceptRule, NetworkCondition, ProxyConfig, ProxyState
 
 
 class ManagementInterface(Protocol):
@@ -30,6 +30,18 @@ class ManagementInterface(Protocol):
 
     def remove_rule(self, rule_id: str, scenario_id: Optional[str] = None) -> bool:
         """Remove rule by id. Returns True if removed."""
+        ...
+
+    def get_network_condition(self, client_ip: str) -> Optional[NetworkCondition]:
+        """Get network condition for client IP. Returns None if not set."""
+        ...
+
+    def set_network_condition(self, client_ip: str, condition: NetworkCondition) -> None:
+        """Set network condition for client IP."""
+        ...
+
+    def clear_network_condition(self, client_ip: str) -> bool:
+        """Clear network condition for client IP. Returns True if existed."""
         ...
 
     def record_request(self, request: dict) -> None:

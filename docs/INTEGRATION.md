@@ -63,6 +63,7 @@ POST /api/activate
 | client_ip | string   | 是   | 客户端 IP（代理看到的连接来源 IP）                 |
 | rule_ids  | string[] | 否   | 规则 ID 列表，覆盖场景默认规则；不传则使用场景配置 |
 | rules     | object[] | 否   | 内联规则（APPAUTO），支持 networkMock、networkDomainRewrite。字段：url、status_code、response、upstream_host、upstream_port |
+| network_condition | object | 否 | 网络条件（弱网/飞行模式）。字段：airplane_mode(bool)、delay_ms(int)、throttle_kbps(int)、packet_loss_rate(float) |
 
 **rules 内联规则字段**（与 rule_ids 二选一或并存）：
 
@@ -89,6 +90,33 @@ POST /api/activate
   "scenario_id": "scenario_B",
   "client_ip": "10.0.0.5",
   "rule_ids": ["login_500", "cart_empty"]
+}
+```
+
+激活 + 弱网模拟：
+
+```json
+{
+  "scenario_id": "scenario_A",
+  "client_ip": "192.168.1.101",
+  "rule_ids": ["login_500"],
+  "network_condition": {
+    "delay_ms": 400,
+    "throttle_kbps": 50,
+    "packet_loss_rate": 0.02
+  }
+}
+```
+
+激活 + 飞行模式：
+
+```json
+{
+  "scenario_id": "scenario_A",
+  "client_ip": "192.168.1.101",
+  "network_condition": {
+    "airplane_mode": true
+  }
 }
 ```
 
@@ -136,6 +164,7 @@ POST /api/generate
 
 **支持的需求格式**：
 
+- 网络条件：`飞行模式`、`断网`、`弱网`、`弱网3G`、`弱网4G`、`高延迟`、`慢网`
 - 预设：`登录失败`、`购物车空`
 - `X 返回 Y`：如 `用户 返回 404`、`/api/order 返回 500`
 - `X 空`：如 `购物车 空`
@@ -240,6 +269,61 @@ GET /api/activate/ip/{client_ip}
 
 **错误**（404）：该 IP 未激活。
 
+### 3.7 设置网络条件（弱网 / 飞行模式）
+
+为指定 IP 设置设备级网络条件，作用于该 IP 的全部流量。
+
+```
+POST /api/network-condition
+```
+
+**请求体**：
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| client_ip | string | 是 | 客户端 IP |
+| airplane_mode | bool | 否 | 飞行模式（阻断所有连接），默认 false |
+| delay_ms | int | 否 | 延迟注入(ms)，0-60000 |
+| throttle_kbps | int | 否 | 限速(KB/s)，0-102400 |
+| packet_loss_rate | float | 否 | 丢包率，0.0-1.0 |
+
+**请求示例**：
+
+```json
+{
+  "client_ip": "192.168.1.101",
+  "delay_ms": 400,
+  "throttle_kbps": 50,
+  "packet_loss_rate": 0.02
+}
+```
+
+**响应**（200）：
+
+```json
+{
+  "ok": true,
+  "message": "Network condition set for 192.168.1.101",
+  "condition": {"airplane_mode": false, "delay_ms": 400, "throttle_kbps": 50, "packet_loss_rate": 0.02}
+}
+```
+
+### 3.8 查看网络条件
+
+```
+GET /api/network-condition                    # 列出所有
+GET /api/network-condition/{client_ip}        # 查询某 IP
+```
+
+### 3.9 清除网络条件
+
+```
+DELETE /api/network-condition/{client_ip}     # 清除某 IP
+DELETE /api/network-condition                 # 清除所有
+```
+
+> 取消激活（`DELETE /api/activate/ip/{client_ip}`）时会自动清除该 IP 的网络条件。
+
 ---
 
 ## 4. 调用流程示例
@@ -255,7 +339,18 @@ GET /api/activate/ip/{client_ip}
 6. 用例结束：DELETE /api/activate/ip/192.168.1.101（可选，清理）
 ```
 
-### 4.2 浏览器场景（X-Scenario-ID）
+### 4.2 弱网测试（APP 场景）
+
+```text
+1. 获取被测设备 IP（如 192.168.1.101）
+2. POST /api/activate 绑定 IP 与场景，同时传入 network_condition
+   或单独 POST /api/network-condition 设置网络条件
+3. 配置被测 APP 使用代理
+4. 执行自动化用例，验证弱网/断网表现
+5. 用例结束：DELETE /api/activate/ip/192.168.1.101（同时清除网络条件）
+```
+
+### 4.3 浏览器场景（X-Scenario-ID）
 
 ```text
 1. 配置浏览器/Playwright 使用代理 127.0.0.1:8080
@@ -298,6 +393,9 @@ use_regex: false
 | body         | 改写响应体（JSON 字符串）               |
 | upstream_host| 域名重写：将匹配请求转发到该 host       |
 | upstream_port| 目标端口（默认 443/80）                 |
+| delay_ms     | 延迟注入(ms)，可选                      |
+| throttle_kbps| 限速(KB/s)，可选                        |
+| packet_loss_rate | 丢包率 0.0-1.0，可选                |
 
 ### 5.3 域名重写（A 域名代理成 B 域名）
 
@@ -505,6 +603,19 @@ curl http://127.0.0.1:8765/api/activate/ip/192.168.1.101
 
 # 取消
 curl -X DELETE http://127.0.0.1:8765/api/activate/ip/192.168.1.101
+
+# 设置弱网 3G
+curl -X POST http://127.0.0.1:8765/api/network-condition \
+  -H "Content-Type: application/json" \
+  -d '{"client_ip":"192.168.1.101","delay_ms":400,"throttle_kbps":50,"packet_loss_rate":0.02}'
+
+# 激活 + 弱网一步完成
+curl -X POST http://127.0.0.1:8765/api/activate \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id":"scenario_A","client_ip":"192.168.1.101","network_condition":{"delay_ms":2000}}'
+
+# 清除网络条件
+curl -X DELETE http://127.0.0.1:8765/api/network-condition/192.168.1.101
 ```
 
 ### Python
@@ -514,12 +625,18 @@ import requests
 
 API_BASE = "http://127.0.0.1:8765"
 
-def activate(scenario_id: str, client_ip: str, rule_ids: list | None = None):
+def activate(scenario_id: str, client_ip: str, rule_ids: list | None = None, network_condition: dict | None = None):
     r = requests.post(f"{API_BASE}/api/activate", json={
         "scenario_id": scenario_id,
         "client_ip": client_ip,
         "rule_ids": rule_ids,
+        "network_condition": network_condition,
     })
+    r.raise_for_status()
+    return r.json()
+
+def set_network_condition(client_ip: str, **kwargs):
+    r = requests.post(f"{API_BASE}/api/network-condition", json={"client_ip": client_ip, **kwargs})
     r.raise_for_status()
     return r.json()
 
@@ -528,10 +645,12 @@ def deactivate_ip(client_ip: str):
     r.raise_for_status()
     return r.json()
 
-# 用例前
-activate("scenario_A", "192.168.1.101")
+# 用例前：激活 + 弱网
+activate("scenario_A", "192.168.1.101", network_condition={"delay_ms": 400, "throttle_kbps": 50})
+# 或单独设置网络条件
+set_network_condition("192.168.1.101", airplane_mode=True)
 # 执行自动化...
-# 用例后
+# 用例后（取消激活会同时清除网络条件）
 deactivate_ip("192.168.1.101")
 ```
 

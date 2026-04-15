@@ -10,6 +10,7 @@
 
 - **动态注入 mock**：无需改代码，通过规则即可模拟接口异常、空数据等
 - **快速验证边界**：登录失败、网络超时、空列表等场景一键切换
+- **网络模拟**：弱网（延迟/限速/丢包）、飞行模式，按设备或接口级别设置
 - **与 Skills 联动**：AI 依据 skill 使用 CLI/REST API 添加/激活规则，实现「对话式调试」
 
 ---
@@ -70,7 +71,25 @@
 
 ---
 
-### 2.5 场景五：对话式切换 mock 场景
+### 2.5 场景五：弱网 / 飞行模式测试
+
+**需求**：验证 APP 在弱网或断网条件下的表现。
+
+**AI 工作流**：
+
+1. 用户：设备 192.168.1.101 模拟弱网 3G
+2. AI 调用 REST API：`curl -X POST http://127.0.0.1:8765/api/network-condition -d '{"client_ip":"192.168.1.101","delay_ms":400,"throttle_kbps":50,"packet_loss_rate":0.02}'`
+3. 用户执行用例，验证 APP 弱网表现（加载动画、超时提示等）
+4. 用户：切换为飞行模式
+5. AI 调用：`curl -X POST http://127.0.0.1:8765/api/network-condition -d '{"client_ip":"192.168.1.101","airplane_mode":true}'`
+6. 验证 APP 断网处理（离线提示、缓存展示等）
+7. 测试完成：`curl -X DELETE http://127.0.0.1:8765/api/network-condition/192.168.1.101`
+
+也可通过 generate API 一步完成：`POST /api/generate -d '{"requirement":"弱网3G","client_ip":"192.168.1.101"}'`
+
+---
+
+### 2.6 场景六：对话式切换 mock 场景
 
 **需求**：在对话中快速切换不同 mock 组合，观察 UI 变化。
 
@@ -98,7 +117,9 @@
 | 域名重写 | `beacon-proxy add-rewrite` | `POST /api/rules` |
 | 删除规则 | `beacon-proxy remove-rule` | `DELETE /api/rules/{id}` |
 | 激活场景 | — | `POST /api/activate` |
-| 生成规则 | — | `POST /api/generate` |
+| 设置网络条件 | — | `POST /api/network-condition` |
+| 清除网络条件 | — | `DELETE /api/network-condition/{ip}` |
+| 生成规则/网络条件 | — | `POST /api/generate` |
 
 ### 3.3 与 AI 的协作提示词
 
@@ -110,6 +131,9 @@
 - 「帮我添加一个规则：/api/orders 返回空数组，状态码 200」
 - 「设备 192.168.1.101 需要应用 login_500 规则，请激活」
 - 「列出当前所有 mock 规则」
+- 「设备 192.168.1.101 模拟弱网 3G」（设置网络条件）
+- 「设备 192.168.1.101 飞行模式」（设置飞行模式）
+- 「清除 192.168.1.101 的网络条件」
 
 ---
 

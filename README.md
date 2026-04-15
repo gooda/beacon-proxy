@@ -1,6 +1,6 @@
 # Beacon Proxy
 
-基于 mitmproxy 的代理服务，用于 UI 自动化测试中的请求拦截与改写。支持 CLI、REST API 与 Skills（AI 编程）。
+基于 mitmproxy 的代理服务，用于 UI 自动化测试中的请求拦截、改写与网络模拟。支持 CLI、REST API 与 Skills（AI 编程）。
 
 - **工具说明**：[TOOL_GUIDE.md](docs/TOOL_GUIDE.md) — 安装、配置、入口、命令与 API 参考
 - **外部系统集成**：[使用规范 (INTEGRATION.md)](docs/INTEGRATION.md) — REST API、调用流程与示例
@@ -136,7 +136,10 @@ beacon-proxy api
 
 **证书配置**：HTTPS 拦截需在设备上安装 CA 证书。证书默认存于 `~/.mitmproxy`，可通过 `BEACON_PROXY_CONFDIR` 自定义。设备配置代理后访问 `http://<API地址>:8765/certificate` 下载；移动端需 `--api-host 0.0.0.0`。详见 [INTEGRATION.md 7.1 证书配置与安装](docs/INTEGRATION.md)。
 
-**规则编辑器**：API 启动后访问 `http://<API地址>:8765/rules` 或 `/editor`，可可视化管理场景、规则与激活。
+## 八、规则编辑器
+
+![规则编辑器](http://dap-ai.fp.ps.netease.com/file/69ba74d3dbc5625e5b9cb461533QuEFe07)
+访问 `http://<host>:8765/rules` 或 `/editor`：
 
 **API 示例：**
 
@@ -162,6 +165,35 @@ curl -X DELETE http://127.0.0.1:8765/api/activate
 ```
 
 **持久化**：激活信息保存在 `activations.yaml`（与 rules 同目录），重启代理后仍生效。
+
+### 网络模拟（弱网 / 飞行模式）
+
+支持按设备 IP 设置网络条件（延迟、限速、丢包、飞行模式），也可在激活时一并传入。
+
+```bash
+# 飞行模式（阻断所有连接）
+curl -X POST http://127.0.0.1:8765/api/network-condition \
+  -H "Content-Type: application/json" \
+  -d '{"client_ip":"192.168.1.101","airplane_mode":true}'
+
+# 弱网 3G（延迟 400ms + 限速 50KB/s + 2% 丢包）
+curl -X POST http://127.0.0.1:8765/api/network-condition \
+  -H "Content-Type: application/json" \
+  -d '{"client_ip":"192.168.1.101","delay_ms":400,"throttle_kbps":50,"packet_loss_rate":0.02}'
+
+# 激活时同时设置网络条件
+curl -X POST http://127.0.0.1:8765/api/activate \
+  -H "Content-Type: application/json" \
+  -d '{"scenario_id":"scenario_A","client_ip":"192.168.1.101","network_condition":{"delay_ms":2000}}'
+
+# 清除网络条件
+curl -X DELETE http://127.0.0.1:8765/api/network-condition/192.168.1.101
+
+# 查看所有网络条件
+curl http://127.0.0.1:8765/api/network-condition
+```
+
+也可在规则级别对特定接口设置延迟/限速/丢包，详见 [INTEGRATION.md](docs/INTEGRATION.md)。
 
 ### Mock 数据示例
 

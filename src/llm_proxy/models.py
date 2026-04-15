@@ -17,6 +17,19 @@ class InterceptRule(BaseModel):
     # 域名重写：将匹配的请求转发到指定 host
     upstream_host: Optional[str] = Field(default=None, description="Rewrite request to this host (A域名->B域名)")
     upstream_port: Optional[int] = Field(default=None, description="Target port, default 443 for https else 80")
+    # 网络模拟（per-rule，URL 匹配后生效）
+    delay_ms: Optional[int] = Field(default=None, description="延迟注入(ms)")
+    throttle_kbps: Optional[int] = Field(default=None, description="限速(KB/s)")
+    packet_loss_rate: Optional[float] = Field(default=None, description="丢包率 0.0-1.0")
+
+
+class NetworkCondition(BaseModel):
+    """Per-client 网络条件（全局，作用于该 IP 的所有流量）。"""
+
+    airplane_mode: bool = Field(default=False, description="飞行模式：阻断所有连接")
+    delay_ms: Optional[int] = Field(default=None, description="全局延迟(ms)")
+    throttle_kbps: Optional[int] = Field(default=None, description="全局限速(KB/s)")
+    packet_loss_rate: Optional[float] = Field(default=None, description="全局丢包率 0.0-1.0")
 
 
 class ProxyConfig(BaseModel):

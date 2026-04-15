@@ -12,6 +12,7 @@
 |------|------|
 | **响应 Mock** | 匹配 URL 后改写状态码、响应体 |
 | **域名重写** | 将 A 域名请求转发到 B 域名（A→B 代理） |
+| **网络模拟** | 弱网（延迟、限速、丢包）、飞行模式，按设备或接口级别设置 |
 | **场景与激活** | 按场景组织规则，支持按 IP 动态激活 |
 | **多入口** | CLI、REST API、规则编辑器、Skills |
 
@@ -83,7 +84,40 @@ beacon-proxy add-rewrite api.prod.example.com api.staging.example.com -d scenari
 | upstream_host | 目标域名（B） |
 | upstream_port | 目标端口，默认 443 |
 
-### 4.3 场景与激活
+### 4.3 网络模拟
+
+按设备 IP 设置全局网络条件（弱网、飞行模式），或在规则级别对特定接口设置。
+
+```bash
+# 飞行模式（阻断所有连接）
+curl -X POST http://127.0.0.1:8765/api/network-condition \
+  -H "Content-Type: application/json" \
+  -d '{"client_ip":"192.168.1.101","airplane_mode":true}'
+
+# 弱网 3G
+curl -X POST http://127.0.0.1:8765/api/network-condition \
+  -H "Content-Type: application/json" \
+  -d '{"client_ip":"192.168.1.101","delay_ms":400,"throttle_kbps":50,"packet_loss_rate":0.02}'
+```
+
+| 字段 | 说明 |
+|------|------|
+| airplane_mode | 飞行模式，阻断所有连接 |
+| delay_ms | 延迟注入(ms) |
+| throttle_kbps | 限速(KB/s) |
+| packet_loss_rate | 丢包率 0.0-1.0 |
+
+**预设参考**：
+
+| 预设 | delay_ms | throttle_kbps | packet_loss_rate |
+|------|----------|---------------|------------------|
+| 弱网 3G | 400 | 50 | 0.02 |
+| 弱网 4G | 150 | 200 | 0.01 |
+| 高延迟 | 2000 | — | — |
+
+**规则级别**：创建规则时可选填 `delay_ms`、`throttle_kbps`、`packet_loss_rate`，仅对匹配 URL 生效，覆盖设备级网络条件。
+
+### 4.4 场景与激活
 
 - **场景**：规则组，对应 `rules/scenarios/{scenario_id}.yaml`
 - **激活**：将客户端 IP 与场景绑定，代理按 IP 应用对应规则
@@ -191,6 +225,16 @@ overrides: {}
 | POST | /api/rules/{id}/bind | 绑定规则到场景 |
 | DELETE | /api/rules/{id}/bind/{scenario_id} | 从场景解绑 |
 
+### 网络条件
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/network-condition | 设置网络条件 |
+| GET | /api/network-condition | 列出所有网络条件 |
+| GET | /api/network-condition/{client_ip} | 查询某 IP 网络条件 |
+| DELETE | /api/network-condition/{client_ip} | 清除某 IP 网络条件 |
+| DELETE | /api/network-condition | 清除所有网络条件 |
+
 ### 场景
 
 | 方法 | 路径 | 说明 |
@@ -213,8 +257,8 @@ overrides: {}
 
 - **场景列表**：切换场景、新建场景
 - **规则列表**：查看、编辑、删除当前场景规则
-- **规则表单**：新增/编辑规则，支持 Mock 响应、域名重写
-- **激活状态**：查看 IP↔场景 映射，激活、取消激活
+- **规则表单**：新增/编辑规则，支持 Mock 响应、域名重写、网络模拟（延迟/限速/丢包）
+- **激活状态**：查看 IP↔场景映射，激活、取消激活，快捷设置网络条件（飞行模式/弱网3G/4G/高延迟）
 
 适用于 rules 目录模式。
 
@@ -254,7 +298,14 @@ overrides: {}
 beacon-proxy add-rewrite api.prod.example.com api.staging.example.com -d scenario_A
 ```
 
-### 场景 4：自然语言生成规则
+### 场景 4：弱网 / 飞行模式测试
+
+1. 获取被测设备 IP
+2. 调用 `POST /api/network-condition` 或在 `POST /api/activate` 中传入 `network_condition`
+3. 执行用例，验证 APP 弱网/断网表现
+4. 测试结束调用 `DELETE /api/network-condition/{client_ip}` 或 `DELETE /api/activate/ip/{client_ip}` 清理
+
+### 场景 5：自然语言生成规则
 
 ```bash
 curl -X POST http://127.0.0.1:8765/api/generate \
@@ -262,7 +313,7 @@ curl -X POST http://127.0.0.1:8765/api/generate \
   -d '{"requirement":"登录失败","scenario_id":"scenario_A","client_ip":"192.168.1.101"}'
 ```
 
-支持：`登录失败`、`购物车空`、`X 返回 Y`、`X 空`、直接 URL 等。
+支持：`飞行模式`、`弱网`、`弱网3G`、`弱网4G`、`高延迟`、`登录失败`、`购物车空`、`X 返回 Y`、`X 空`、直接 URL 等。
 
 ---
 

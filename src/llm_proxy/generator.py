@@ -1,9 +1,9 @@
-"""从代理需求自动生成拦截规则。"""
+"""从代理需求自动生成拦截规则 / 网络条件。"""
 
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
-from llm_proxy.models import InterceptRule
+from llm_proxy.models import InterceptRule, NetworkCondition
 
 # 预设：需求描述 -> 规则
 PRESETS: dict[str, InterceptRule] = {
@@ -41,6 +41,17 @@ PRESETS: dict[str, InterceptRule] = {
     ),
 }
 
+# 网络条件预设：需求描述 -> NetworkCondition
+NETWORK_PRESETS: dict[str, NetworkCondition] = {
+    "飞行模式": NetworkCondition(airplane_mode=True),
+    "断网": NetworkCondition(airplane_mode=True),
+    "弱网": NetworkCondition(delay_ms=400, throttle_kbps=50, packet_loss_rate=0.02),
+    "弱网3g": NetworkCondition(delay_ms=400, throttle_kbps=50, packet_loss_rate=0.02),
+    "弱网4g": NetworkCondition(delay_ms=150, throttle_kbps=200, packet_loss_rate=0.01),
+    "高延迟": NetworkCondition(delay_ms=2000),
+    "慢网": NetworkCondition(delay_ms=2000, throttle_kbps=100),
+}
+
 # 中文/简写 -> URL 路径映射
 URL_HINTS: dict[str, str] = {
     "登录": "/api/login",
@@ -60,6 +71,25 @@ def _slug(s: str) -> str:
     return re.sub(r"_+", "_", s).strip("_") or "rule"
 
 
+def generate_network_condition(requirement: str) -> Optional[NetworkCondition]:
+    """
+    从自然语言需求生成网络条件。
+
+    支持格式：飞行模式、断网、弱网、弱网3G、弱网4G、高延迟、慢网
+    返回 NetworkCondition 或 None（不是网络条件需求）。
+    """
+    req = requirement.strip()
+    if not req:
+        return None
+
+    key = re.sub(r"[\s_\-]+", "", req.lower())
+    for preset_key, condition in NETWORK_PRESETS.items():
+        if re.sub(r"[\s_\-]+", "", preset_key.lower()) == key:
+            return condition
+
+    return None
+
+
 def generate_rules_from_requirement(requirement: str) -> List[InterceptRule]:
     """
     从自然语言需求生成规则列表。
@@ -72,6 +102,10 @@ def generate_rules_from_requirement(requirement: str) -> List[InterceptRule]:
     """
     req = requirement.strip()
     if not req:
+        return []
+
+    # 0. 如果是网络条件需求，返回空（调用方应使用 generate_network_condition）
+    if generate_network_condition(req) is not None:
         return []
 
     # 1. 预设匹配（忽略大小写、空格）

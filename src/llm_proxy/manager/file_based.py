@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Type, TypeVar
 import yaml
 from pydantic import BaseModel
 
-from llm_proxy.models import InterceptRule, ProxyConfig, ProxyState
+from llm_proxy.models import InterceptRule, NetworkCondition, ProxyConfig, ProxyState
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -42,6 +42,7 @@ class ActivationsSchema(BaseModel):
 
     ip_to_scenario: Dict[str, str] = {}  # client_ip -> scenario_id
     scenario_rule_overrides: Dict[str, List[str]] = {}  # scenario_id -> rule_ids (override scenarios/*.yaml)
+    network_conditions: Dict[str, Dict[str, Any]] = {}  # client_ip -> NetworkCondition dict
 
 
 def _safe_filename(name: str) -> str:
@@ -228,6 +229,9 @@ class FileBasedManager:
             changed = True
             if scenario_from_ip in self._scenario_inline_rules:
                 del self._scenario_inline_rules[scenario_from_ip]
+        if client_ip and client_ip in acts.network_conditions:
+            del acts.network_conditions[client_ip]
+            changed = True
         if scenario_id:
             to_remove = [ip for ip, sid in acts.ip_to_scenario.items() if sid == scenario_id]
             for ip in to_remove:
@@ -247,10 +251,12 @@ class FileBasedManager:
         """Deactivate all activations. Returns count of cleared IP bindings."""
         acts = self._load_activations()
         count = len(acts.ip_to_scenario)
-        if count == 0 and not acts.scenario_rule_overrides and not self._scenario_inline_rules:
+        has_conditions = bool(acts.network_conditions)
+        if count == 0 and not acts.scenario_rule_overrides and not self._scenario_inline_rules and not has_conditions:
             return 0
         acts.ip_to_scenario.clear()
         acts.scenario_rule_overrides.clear()
+        acts.network_conditions.clear()
         self._scenario_inline_rules.clear()
         self._save_activations(acts)
         return count
@@ -379,12 +385,43 @@ class FileBasedManager:
         existing = self._load_definition(rule_id)
         if not existing:
             return None
-        allowed = {"url_pattern", "description", "status_code", "body", "use_regex", "upstream_host", "upstream_port"}
+        allowed = {"url_pattern", "description", "status_code", "body", "use_regex", "upstream_host", "upstream_port", "delay_ms", "throttle_kbps", "packet_loss_rate"}
         d = _pydantic_dump(existing)
         d.update({k: v for k, v in updates.items() if k in allowed})
         updated = _pydantic_validate(InterceptRule, d)
         self._save_definition(updated)
         return updated
+
+    def set_network_condition(self, client_ip: str, condition: NetworkCondition) -> None:
+        """Set network condition for a client IP. Persisted to activations.yaml."""
+        acts = self._load_activations()
+        acts.network_conditions[client_ip] = _pydantic_dump(condition)
+        self._save_activations(acts)
+
+    def get_network_condition(self, client_ip: str) -> Optional[NetworkCondition]:
+        """Get network condition for a client IP. Returns None if not set."""
+        acts = self._load_activations()
+        data = acts.network_conditions.get(client_ip)
+        if data:
+            return _pydantic_validate(NetworkCondition, data)
+        return None
+
+    def clear_network_condition(self, client_ip: str) -> bool:
+        """Clear network condition for a client IP. Returns True if existed."""
+        acts = self._load_activations()
+        if client_ip in acts.network_conditions:
+            del acts.network_conditions[client_ip]
+            self._save_activations(acts)
+            return True
+        return False
+
+    def list_network_conditions(self) -> Dict[str, NetworkCondition]:
+        """List all active network conditions, keyed by client IP."""
+        acts = self._load_activations()
+        result: Dict[str, NetworkCondition] = {}
+        for ip, data in acts.network_conditions.items():
+            result[ip] = _pydantic_validate(NetworkCondition, data)
+        return result
 
     def record_request(self, request: dict) -> None:
         self._state.recorded_requests.append(request)

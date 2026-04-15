@@ -167,7 +167,7 @@
     .activation-panel h3 { margin: 0 0 var(--space-lg); font-size: 0.875rem; font-weight: 600; color: var(--text-muted); }
     .activation-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
       gap: var(--space-md);
     }
     .activation-card {
@@ -180,8 +180,18 @@
     .activation-card:hover { border-color: var(--accent-muted); box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
     .activation-card .ip { font-family: var(--font-mono); font-size: 0.9375rem; font-weight: 500; color: var(--accent); }
     .activation-card .scenario { font-size: 0.875rem; color: var(--text-muted); margin-top: var(--space-xs); }
-    .activation-card .actions { margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px solid var(--border); }
-    .activation-card .btn { width: 100%; }
+    .activation-card .net-info { margin-top: var(--space-sm); }
+    .activation-card .net-presets-inline { display: flex; flex-wrap: wrap; gap: var(--space-xs); margin-top: var(--space-sm); }
+    .activation-card .net-presets-inline button {
+      padding: 2px var(--space-sm); font-family: var(--font-mono); font-size: 0.75rem;
+      background: transparent; color: var(--text-muted); border: 1px solid var(--border);
+      cursor: pointer; transition: all 0.15s var(--ease-out);
+    }
+    .activation-card .net-presets-inline button:hover { color: var(--accent); border-color: var(--accent-muted); background: var(--bg-hover); }
+    .activation-card .net-presets-inline button.preset-airplane { color: var(--danger); border-color: var(--danger-dim); }
+    .activation-card .net-presets-inline button.preset-airplane:hover { background: rgba(248, 81, 73, 0.12); }
+    .activation-card .actions { margin-top: var(--space-md); padding-top: var(--space-md); border-top: 1px solid var(--border); display: flex; gap: var(--space-sm); }
+    .activation-card .actions .btn { flex: 1; }
     .msg {
       padding: var(--space-md); margin: var(--space-md) 0;
       font-size: 0.875rem; border-radius: var(--radius-sm);
@@ -228,6 +238,44 @@
     a.btn { display: inline-block; color: inherit; }
     a.btn:hover { text-decoration: none; }
     .empty code { font-family: var(--font-mono); font-size: 0.875em; background: var(--bg-hover); padding: 2px 6px; border: 1px solid var(--border); }
+    .net-presets { display: flex; flex-wrap: wrap; gap: var(--space-sm); margin-bottom: var(--space-lg); }
+    .net-presets button {
+      padding: var(--space-sm) var(--space-lg); font-family: var(--font-mono); font-size: 0.875rem;
+      background: transparent; color: var(--text-muted); border: 1px solid var(--border);
+      cursor: pointer; transition: all 0.15s var(--ease-out);
+    }
+    .net-presets button:hover { color: var(--accent); border-color: var(--accent-muted); background: var(--bg-hover); }
+    .net-badge {
+      padding: 2px var(--space-sm); font-family: var(--font-mono); font-size: 0.75rem; font-weight: 500;
+      border-radius: var(--radius-sm);
+    }
+    .net-badge.airplane { background: rgba(248, 81, 73, 0.2); color: var(--danger); }
+    .net-badge.delay { background: rgba(227, 179, 65, 0.2); color: var(--warning); }
+    .net-badge.throttle { background: rgba(88, 166, 255, 0.2); color: var(--accent); }
+    .net-badge.loss { background: rgba(248, 81, 73, 0.15); color: #ff7b72; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md); }
+    .form-section-title {
+      font-size: 0.8125rem; font-weight: 600; color: var(--text-muted);
+      margin: var(--space-lg) 0 var(--space-sm); padding-top: var(--space-md);
+      border-top: 1px solid var(--border);
+    }
+    .toggle-row { display: flex; align-items: center; gap: var(--space-md); margin-bottom: var(--space-md); }
+    .toggle-row label { font-size: 0.875rem; color: var(--text-muted); }
+    .toggle-switch {
+      position: relative; width: 40px; height: 22px; cursor: pointer;
+    }
+    .toggle-switch input { display: none; }
+    .toggle-switch .slider {
+      position: absolute; inset: 0; background: var(--border); border-radius: 11px;
+      transition: background 0.2s var(--ease-out);
+    }
+    .toggle-switch .slider::before {
+      content: ""; position: absolute; left: 2px; top: 2px;
+      width: 18px; height: 18px; background: var(--text); border-radius: 50%;
+      transition: transform 0.2s var(--ease-out);
+    }
+    .toggle-switch input:checked + .slider { background: var(--danger); }
+    .toggle-switch input:checked + .slider::before { transform: translateX(18px); }
   </style>
 </head>
 <body>
@@ -291,6 +339,21 @@
             <label>目标端口</label>
             <input id="rule-port" type="number" placeholder="443" />
           </div>
+          <div class="form-section-title">网络模拟（可选）</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>延迟 (ms)</label>
+              <input id="rule-delay" type="number" placeholder="不设置" min="0" max="60000" />
+            </div>
+            <div class="form-group">
+              <label>限速 (KB/s)</label>
+              <input id="rule-throttle" type="number" placeholder="不设置" min="0" max="102400" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>丢包率 (0.0 - 1.0)</label>
+            <input id="rule-loss" type="number" placeholder="不设置" min="0" max="1" step="0.01" />
+          </div>
           <div class="form-actions">
             <button class="btn btn-primary" onclick="saveRule()">保存</button>
             <button class="btn btn-ghost" onclick="cancelEdit()">取消</button>
@@ -303,7 +366,10 @@
       <div class="activation-panel" style="flex:1; overflow-y:auto;">
         <h3>规则应用</h3>
         <div id="activation-list" class="activation-grid"></div>
-        <button class="btn-add" onclick="showActivateModal()" style="margin-top: var(--space-lg);">+ 激活场景</button>
+        <div style="display:flex; gap:var(--space-sm); margin-top:var(--space-lg);">
+          <button class="btn-add" onclick="showActivateModal()" style="flex:1;margin:0;">+ 激活场景</button>
+          <button class="btn-add" onclick="showNetConditionModal()" style="flex:1;margin:0;">+ 设置网络条件</button>
+        </div>
       </div>
     </div>
   </div>
@@ -318,6 +384,47 @@
       <div class="form-actions">
         <button class="btn btn-primary" onclick="createScenario()">创建</button>
         <button class="btn btn-ghost" onclick="closeModal('modal-scenario')">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-net-condition" class="modal" onclick="if(event.target===this)closeModal('modal-net-condition')">
+    <div class="modal-content">
+      <h4>设置网络条件</h4>
+      <div class="net-presets">
+        <button class="preset-airplane" onclick="applyNetPreset('airplane')">飞行模式</button>
+        <button onclick="applyNetPreset('3g')">弱网 3G</button>
+        <button onclick="applyNetPreset('4g')">弱网 4G</button>
+        <button onclick="applyNetPreset('latency')">高延迟</button>
+      </div>
+      <div class="form-group">
+        <label>客户端 IP</label>
+        <input id="net-ip" placeholder="192.168.1.101" />
+      </div>
+      <div class="toggle-row">
+        <label class="toggle-switch">
+          <input type="checkbox" id="net-airplane" />
+          <span class="slider"></span>
+        </label>
+        <label>飞行模式（阻断所有连接）</label>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>延迟 (ms)</label>
+          <input id="net-delay" type="number" placeholder="0" min="0" max="60000" />
+        </div>
+        <div class="form-group">
+          <label>限速 (KB/s)</label>
+          <input id="net-throttle" type="number" placeholder="0" min="0" max="102400" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>丢包率 (0.0 - 1.0)</label>
+        <input id="net-loss" type="number" placeholder="0" min="0" max="1" step="0.01" />
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" onclick="saveNetCondition()">保存</button>
+        <button class="btn btn-ghost" onclick="closeModal('modal-net-condition')">取消</button>
       </div>
     </div>
   </div>
@@ -356,6 +463,7 @@
       document.getElementById('view-apply').classList.toggle('hidden', isConfig);
       document.getElementById('tab-config').classList.toggle('active', isConfig);
       document.getElementById('tab-apply').classList.toggle('active', !isConfig);
+      if (!isConfig) loadActivations();
     }
 
     function formatApiError(err) {
@@ -427,21 +535,64 @@
 
     async function loadActivations() {
       try {
-        const acts = await fetchJson('/api/activate');
+        const [acts, conditions] = await Promise.all([
+          fetchJson('/api/activate'),
+          fetchJson('/api/network-condition').catch(() => ({})),
+        ]);
         const ips = acts.ip_to_scenario || {};
         const el = document.getElementById('activation-list');
-        if (Object.keys(ips).length === 0) {
+
+        // Merge all IPs from activations and network conditions
+        const allIps = new Set([...Object.keys(ips), ...Object.keys(conditions)]);
+        if (allIps.size === 0) {
           el.innerHTML = '<div class="empty" style="grid-column: 1/-1;"><strong>暂无激活</strong><br>测试前调用 API 或点击下方按钮，将 IP 与场景绑定</div>';
           return;
         }
-        el.innerHTML = Object.entries(ips).map(([ip, sid]) => {
+        el.innerHTML = Array.from(allIps).map(ip => {
           const ipAttr = escapeAttr(ip);
+          const sid = ips[ip];
+          const c = conditions[ip];
+
+          let scenarioHtml = sid
+            ? `<div class="scenario">\u2192 ${escapeHtml(sid)}</div>`
+            : `<div class="scenario" style="color:var(--text-muted);font-style:italic;">未绑定场景</div>`;
+
+          let badgesHtml = '';
+          if (c) {
+            if (c.airplane_mode) badgesHtml += '<span class="net-badge airplane">飞行模式</span>';
+            if (c.delay_ms) badgesHtml += '<span class="net-badge delay">延迟 ' + c.delay_ms + 'ms</span>';
+            if (c.throttle_kbps) badgesHtml += '<span class="net-badge throttle">限速 ' + c.throttle_kbps + 'KB/s</span>';
+            if (c.packet_loss_rate) badgesHtml += '<span class="net-badge loss">丢包 ' + (c.packet_loss_rate * 100).toFixed(0) + '%</span>';
+          }
+
+          let netInfoHtml = '';
+          if (badgesHtml) {
+            netInfoHtml = `<div class="net-info"><div class="badges">${badgesHtml}</div></div>`;
+          }
+
+          const presetsHtml = `<div class="net-presets-inline">
+            <button class="preset-airplane" data-ip="${ipAttr}" onclick="quickNetPreset(this.dataset.ip,'airplane')">飞行模式</button>
+            <button data-ip="${ipAttr}" onclick="quickNetPreset(this.dataset.ip,'3g')">弱网3G</button>
+            <button data-ip="${ipAttr}" onclick="quickNetPreset(this.dataset.ip,'4g')">弱网4G</button>
+            <button data-ip="${ipAttr}" onclick="quickNetPreset(this.dataset.ip,'latency')">高延迟</button>
+            <button data-ip="${ipAttr}" onclick="showNetConditionModalForIp(this.dataset.ip)">自定义</button>
+          </div>`;
+
+          let actionsHtml = '<div class="actions">';
+          if (sid) {
+            actionsHtml += `<button class="btn btn-danger" data-ip="${ipAttr}" onclick="deactivateIp(this.dataset.ip)">取消激活</button>`;
+          }
+          if (c) {
+            actionsHtml += `<button class="btn btn-ghost" data-ip="${ipAttr}" onclick="clearNetCondition(this.dataset.ip)">清除网络条件</button>`;
+          }
+          actionsHtml += '</div>';
+
           return `<div class="activation-card">
             <div class="ip">${escapeHtml(ip)}</div>
-            <div class="scenario">→ ${escapeHtml(sid)}</div>
-            <div class="actions">
-              <button class="btn btn-danger" data-ip="${ipAttr}" onclick="deactivateIp(this.dataset.ip)">取消激活</button>
-            </div>
+            ${scenarioHtml}
+            ${netInfoHtml}
+            ${presetsHtml}
+            ${actionsHtml}
           </div>`;
         }).join('');
       } catch (e) {
@@ -498,6 +649,9 @@
       document.getElementById('rule-body').value = '';
       document.getElementById('rule-upstream').value = '';
       document.getElementById('rule-port').value = '443';
+      document.getElementById('rule-delay').value = '';
+      document.getElementById('rule-throttle').value = '';
+      document.getElementById('rule-loss').value = '';
       document.getElementById('form-msg').innerHTML = '';
       setFormMode('mock');
       showEditPanel();
@@ -514,6 +668,9 @@
         document.getElementById('rule-body').value = (typeof r.body === 'string' ? r.body : '') || '';
         document.getElementById('rule-upstream').value = r.upstream_host || '';
         document.getElementById('rule-port').value = r.upstream_port || 443;
+        document.getElementById('rule-delay').value = r.delay_ms || '';
+        document.getElementById('rule-throttle').value = r.throttle_kbps || '';
+        document.getElementById('rule-loss').value = r.packet_loss_rate || '';
         setFormMode(r.upstream_host ? 'rewrite' : 'mock');
         document.getElementById('form-msg').innerHTML = '';
         showEditPanel();
@@ -543,6 +700,12 @@
         body.upstream_host = document.getElementById('rule-upstream').value.trim() || null;
         body.upstream_port = parseInt(document.getElementById('rule-port').value, 10) || 443;
       }
+      const delayVal = document.getElementById('rule-delay').value;
+      const throttleVal = document.getElementById('rule-throttle').value;
+      const lossVal = document.getElementById('rule-loss').value;
+      body.delay_ms = delayVal ? parseInt(delayVal, 10) : null;
+      body.throttle_kbps = throttleVal ? parseInt(throttleVal, 10) : null;
+      body.packet_loss_rate = lossVal ? parseFloat(lossVal) : null;
       try {
         if (editingRuleId) {
           const updateBody = { url_pattern: body.url_pattern, description: body.description };
@@ -553,6 +716,9 @@
             updateBody.upstream_host = body.upstream_host;
             updateBody.upstream_port = body.upstream_port;
           }
+          updateBody.delay_ms = body.delay_ms;
+          updateBody.throttle_kbps = body.throttle_kbps;
+          updateBody.packet_loss_rate = body.packet_loss_rate;
           const r = await fetch(API + '/api/rules/' + encodeURIComponent(editingRuleId), {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -687,6 +853,85 @@
 
     function closeModal(id) {
       document.getElementById(id).classList.remove('show');
+    }
+
+    const NET_PRESETS = {
+      airplane: { airplane_mode: true, delay_ms: null, throttle_kbps: null, packet_loss_rate: null },
+      '3g': { airplane_mode: false, delay_ms: 400, throttle_kbps: 50, packet_loss_rate: 0.02 },
+      '4g': { airplane_mode: false, delay_ms: 150, throttle_kbps: 200, packet_loss_rate: 0.01 },
+      latency: { airplane_mode: false, delay_ms: 2000, throttle_kbps: null, packet_loss_rate: null },
+    };
+
+    async function quickNetPreset(ip, preset) {
+      const p = NET_PRESETS[preset];
+      if (!p) return;
+      try {
+        await fetchJson('/api/network-condition', { method: 'POST', body: JSON.stringify({ client_ip: ip, ...p }) });
+        loadActivations();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    function showNetConditionModal() {
+      document.getElementById('net-ip').value = '';
+      document.getElementById('net-airplane').checked = false;
+      document.getElementById('net-delay').value = '';
+      document.getElementById('net-throttle').value = '';
+      document.getElementById('net-loss').value = '';
+      document.getElementById('modal-net-condition').classList.add('show');
+    }
+
+    function showNetConditionModalForIp(ip) {
+      document.getElementById('net-ip').value = ip;
+      document.getElementById('net-airplane').checked = false;
+      document.getElementById('net-delay').value = '';
+      document.getElementById('net-throttle').value = '';
+      document.getElementById('net-loss').value = '';
+      document.getElementById('modal-net-condition').classList.add('show');
+    }
+
+    function applyNetPreset(preset) {
+      const p = NET_PRESETS[preset];
+      if (!p) return;
+      document.getElementById('net-airplane').checked = p.airplane_mode;
+      document.getElementById('net-delay').value = p.delay_ms || '';
+      document.getElementById('net-throttle').value = p.throttle_kbps || '';
+      document.getElementById('net-loss').value = p.packet_loss_rate || '';
+    }
+
+    async function saveNetCondition() {
+      const client_ip = document.getElementById('net-ip').value.trim();
+      if (!client_ip) {
+        alert('客户端 IP 不能为空');
+        return;
+      }
+      const delayVal = document.getElementById('net-delay').value;
+      const throttleVal = document.getElementById('net-throttle').value;
+      const lossVal = document.getElementById('net-loss').value;
+      const body = {
+        client_ip,
+        airplane_mode: document.getElementById('net-airplane').checked,
+        delay_ms: delayVal ? parseInt(delayVal, 10) : null,
+        throttle_kbps: throttleVal ? parseInt(throttleVal, 10) : null,
+        packet_loss_rate: lossVal ? parseFloat(lossVal) : null,
+      };
+      try {
+        await fetchJson('/api/network-condition', { method: 'POST', body: JSON.stringify(body) });
+        closeModal('modal-net-condition');
+        loadActivations();
+      } catch (e) {
+        alert(e.message);
+      }
+    }
+
+    async function clearNetCondition(ip) {
+      try {
+        await fetchJson('/api/network-condition/' + encodeURIComponent(ip), { method: 'DELETE' });
+        loadActivations();
+      } catch (e) {
+        alert(e.message);
+      }
     }
 
     function refresh() {

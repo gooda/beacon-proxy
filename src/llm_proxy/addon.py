@@ -1,6 +1,8 @@
 """mitmproxy addon - intercept and rewrite responses."""
 
+import random
 import re
+import time
 from typing import TYPE_CHECKING, Optional
 
 from llm_proxy.models import InterceptRule
@@ -33,21 +35,40 @@ class LLMProxyAddon:
         return None
 
     def request(self, flow: "HTTPFlow") -> None:
-        """域名重写（upstream_host）与请求记录。"""
+        """网络条件检查、域名重写（upstream_host）与请求记录。"""
         url = flow.request.pretty_url
         client_ip = self._get_client_ip(flow)
+
+        # 1. Per-client 网络条件检查（飞行模式、全局丢包）
+        if client_ip:
+            condition = self.manager.get_network_condition(client_ip)
+            if condition:
+                if condition.airplane_mode:
+                    flow.kill()
+                    return
+                if condition.packet_loss_rate and random.random() < condition.packet_loss_rate:
+                    flow.kill()
+                    return
+
+        # 2. 获取规则
         rules = self.manager.get_intercept_rules_for_client(client_ip) if client_ip else []
         if not rules:
             scenario_id = self._get_scenario_id(flow)
             rules = self.manager.get_intercept_rules(scenario_id)
 
+        # 3. 域名重写 + per-rule 丢包检查
         for rule in rules:
-            if rule.upstream_host and self._match_url(url, rule):
-                flow.request.host = rule.upstream_host
-                flow.request.port = rule.upstream_port or (443 if flow.request.scheme == "https" else 80)
-                flow.request.headers["Host"] = rule.upstream_host
+            if self._match_url(url, rule):
+                if rule.packet_loss_rate and random.random() < rule.packet_loss_rate:
+                    flow.kill()
+                    return
+                if rule.upstream_host:
+                    flow.request.host = rule.upstream_host
+                    flow.request.port = rule.upstream_port or (443 if flow.request.scheme == "https" else 80)
+                    flow.request.headers["Host"] = rule.upstream_host
                 break
 
+        # 4. 记录请求
         try:
             self.manager.record_request(
                 {
@@ -61,14 +82,26 @@ class LLMProxyAddon:
             pass
 
     def response(self, flow: "HTTPFlow") -> None:
-        """Rewrite response if matched by rule. Activation (by IP) takes precedence over X-Scenario-ID."""
+        """Rewrite response + 网络模拟（延迟、限速）。Activation (by IP) takes precedence over X-Scenario-ID."""
         client_ip = self._get_client_ip(flow)
+
+        # 1. Per-client 网络条件作为默认值
+        effective_delay_ms = None
+        effective_throttle_kbps = None
+        if client_ip:
+            condition = self.manager.get_network_condition(client_ip)
+            if condition:
+                effective_delay_ms = condition.delay_ms
+                effective_throttle_kbps = condition.throttle_kbps
+
+        # 2. 获取规则
         rules = self.manager.get_intercept_rules_for_client(client_ip) if client_ip else []
         if not rules:
             scenario_id = self._get_scenario_id(flow)
             rules = self.manager.get_intercept_rules(scenario_id)
         url = flow.request.pretty_url
 
+        # 3. 规则匹配：响应覆写 + per-rule 网络模拟覆盖
         for rule in rules:
             if self._match_url(url, rule):
                 if rule.status_code is not None:
@@ -78,7 +111,22 @@ class LLMProxyAddon:
                     if isinstance(content, str):
                         content = content.encode("utf-8")
                     flow.response.content = content
+                if rule.delay_ms is not None:
+                    effective_delay_ms = rule.delay_ms
+                if rule.throttle_kbps is not None:
+                    effective_throttle_kbps = rule.throttle_kbps
                 break
+
+        # 4. 应用延迟注入
+        if effective_delay_ms and effective_delay_ms > 0:
+            time.sleep(effective_delay_ms / 1000.0)
+
+        # 5. 应用限速（按响应大小计算传输耗时）
+        if effective_throttle_kbps and effective_throttle_kbps > 0:
+            content_length = len(flow.response.content or b"")
+            if content_length > 0:
+                transfer_time = content_length / (effective_throttle_kbps * 1024)
+                time.sleep(transfer_time)
 
     def _match_url(self, url: str, rule: InterceptRule) -> bool:
         """Check if url matches rule's url_pattern."""
