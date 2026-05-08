@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Type, TypeVar
 import yaml
 from pydantic import BaseModel
 
-from llm_proxy.models import InterceptRule, NetworkCondition, ProxyConfig, ProxyState
+from llm_proxy.models import InterceptRule, NetworkCondition, ProxyConfig, ProxyState, RemoteApiCall
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -62,11 +62,28 @@ class FileBasedManager:
         # Inline rules from APPAUTO activate API (scenario_id -> rules), ephemeral, not persisted
         self._scenario_inline_rules: Dict[str, List[InterceptRule]] = {}
 
+    def resolve_body_file_path(self, body_file: str) -> Path:
+        """Relative paths are resolved from the directory containing rules.yaml, or rules/ in reuse mode."""
+        p = Path(body_file).expanduser()
+        if p.is_absolute():
+            return p
+        base = self._rules_base.parent if self._single_file else self._rules_base
+        return (base / p).resolve()
+
     def _definitions_dir(self) -> Path:
         return self._rules_base / "definitions"
 
     def _scenarios_dir(self) -> Path:
         return self._rules_base / "scenarios"
+
+    def _remote_calls_dir(self) -> Path:
+        """Remote calls live next to rules.yaml (single-file mode) or under rules/ (reuse mode)."""
+        if self._single_file:
+            return self._rules_base.parent / "remote_calls"
+        return self._rules_base / "remote_calls"
+
+    def _remote_call_path(self, call_id: str) -> Path:
+        return self._remote_calls_dir() / f"{_safe_filename(call_id)}.yaml"
 
     def _activations_path(self) -> Path:
         """Activations file: same dir as rules.yaml, or rules/activations.yaml."""
@@ -385,7 +402,7 @@ class FileBasedManager:
         existing = self._load_definition(rule_id)
         if not existing:
             return None
-        allowed = {"url_pattern", "description", "status_code", "body", "use_regex", "upstream_host", "upstream_port", "delay_ms", "throttle_kbps", "packet_loss_rate"}
+        allowed = {"url_pattern", "description", "status_code", "body", "body_file", "use_regex", "upstream_host", "upstream_port", "delay_ms", "throttle_kbps", "packet_loss_rate"}
         d = _pydantic_dump(existing)
         d.update({k: v for k, v in updates.items() if k in allowed})
         updated = _pydantic_validate(InterceptRule, d)
@@ -433,3 +450,50 @@ class FileBasedManager:
         if url_pattern:
             requests = [r for r in requests if url_pattern in r.get("url", "")]
         return list(reversed(requests))
+
+    def get_last_request_for_ip(self, client_ip: str) -> Optional[dict]:
+        """Most recent recorded request for client IP, or None."""
+        for req in reversed(self._state.recorded_requests):
+            if req.get("client_ip") == client_ip:
+                return req
+        return None
+
+    # --- Remote API calls ---
+
+    def list_remote_calls(self) -> List[RemoteApiCall]:
+        result: List[RemoteApiCall] = []
+        d = self._remote_calls_dir()
+        if not d.exists():
+            return result
+        for p in sorted(d.glob("*.yaml")):
+            data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+            try:
+                result.append(_pydantic_validate(RemoteApiCall, data))
+            except Exception:
+                pass
+        return result
+
+    def get_remote_call(self, call_id: str) -> Optional[RemoteApiCall]:
+        path = self._remote_call_path(call_id)
+        if not path.exists():
+            return None
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        try:
+            return _pydantic_validate(RemoteApiCall, data)
+        except Exception:
+            return None
+
+    def save_remote_call(self, call: RemoteApiCall) -> None:
+        path = self._remote_call_path(call.id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            yaml.dump(_pydantic_dump(call), allow_unicode=True, default_flow_style=False, sort_keys=False),
+            encoding="utf-8",
+        )
+
+    def delete_remote_call(self, call_id: str) -> bool:
+        path = self._remote_call_path(call_id)
+        if path.exists():
+            path.unlink()
+            return True
+        return False

@@ -103,6 +103,24 @@
 
 ---
 
+### 2.7 场景七：测试用例中触发远端调用（出站 API 编排）
+
+**需求**：自动化用例需要反复"重置登录状态"、"初始化测试数据"，不想在脚本里硬编码远端地址和鉴权。
+
+**AI 工作流**：
+
+1. 用户：用例前要先调后端 `/user/reset` 清登录态，帮我在代理里配一下
+2. AI 调用 `POST /api/remote-calls` 注册定义，URL 里用 `{{user_id}}` 模板，Authorization header 用 `{{device.last_request.headers.authorization}}` 从最近请求里取
+3. 用例执行时调用 `POST /api/remote-calls/reset_login/invoke`，传入 `variables.user_id` 和 `client_ip`，代理替测试脚本发起出站调用
+4. 如果调用耗时较长，AI 建议用 `?mode=async` 立即拿到 `call_id`，稍后查结果
+
+**典型提示词**：
+- 「帮我配一下重置登录态的调用，POST `<URL>`，需要从设备最近请求里取 Authorization」
+- 「用例里如何触发重置？给段 Python 示例」
+- 「看下最近的调用记录，检查有没有失败的」
+
+---
+
 ## 3. Skills 与 AI 协作
 
 ### 3.1 Skills 说明
@@ -116,10 +134,14 @@
 | 添加规则 | `beacon-proxy add-rule` | `POST /api/rules` |
 | 域名重写 | `beacon-proxy add-rewrite` | `POST /api/rules` |
 | 删除规则 | `beacon-proxy remove-rule` | `DELETE /api/rules/{id}` |
-| 激活场景 | — | `POST /api/activate` |
-| 设置网络条件 | — | `POST /api/network-condition` |
-| 清除网络条件 | — | `DELETE /api/network-condition/{ip}` |
-| 生成规则/网络条件 | — | `POST /api/generate` |
+| 激活场景 | `beacon-proxy activate <scenario> <ip>` | `POST /api/activate` |
+| 取消激活 | `beacon-proxy deactivate --scenario\|--ip\|--all` | `DELETE /api/activate/*` |
+| 设置网络条件 | `beacon-proxy set-net-condition <ip> --preset 3g` | `POST /api/network-condition` |
+| 清除网络条件 | `beacon-proxy clear-net-condition --ip <ip>` | `DELETE /api/network-condition/{ip}` |
+| 生成规则/网络条件 | `beacon-proxy generate <需求> --ip <ip>` | `POST /api/generate` |
+| 注册远端调用 | `beacon-proxy remote-call add <id> -u <url>` | `POST /api/remote-calls` |
+| 触发远端调用 | `beacon-proxy remote-call invoke <id> [--async]` | `POST /api/remote-calls/{id}/invoke?mode=sync\|async` |
+| 查看调用记录 | `beacon-proxy remote-call calls [-n N]` | `GET /api/remote-calls/calls?limit=N` |
 
 ### 3.3 与 AI 的协作提示词
 

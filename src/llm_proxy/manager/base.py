@@ -1,8 +1,9 @@
 """Management interface abstraction."""
 
+from pathlib import Path
 from typing import List, Optional, Protocol
 
-from llm_proxy.models import InterceptRule, NetworkCondition, ProxyConfig, ProxyState
+from llm_proxy.models import InterceptRule, NetworkCondition, ProxyConfig, ProxyState, RemoteApiCall
 
 
 class ManagementInterface(Protocol):
@@ -18,6 +19,10 @@ class ManagementInterface(Protocol):
 
     def get_config(self) -> ProxyConfig:
         """Get proxy config."""
+        ...
+
+    def resolve_body_file_path(self, body_file: str) -> Path:
+        """Resolve body_file to an absolute path (relative paths are under rules base)."""
         ...
 
     def get_state(self) -> ProxyState:
@@ -50,4 +55,26 @@ class ManagementInterface(Protocol):
 
     def get_recorded_requests(self, url_pattern: Optional[str] = None, limit: int = 100) -> List[dict]:
         """Get recorded requests, optionally filtered by url_pattern."""
+        ...
+
+    def get_last_request_for_ip(self, client_ip: str) -> Optional[dict]:
+        """Return the most recent recorded request for client IP, or None."""
+        ...
+
+    # --- Remote API calls (独立于 rules/network_condition 的出站调用配置) ---
+
+    def list_remote_calls(self) -> List[RemoteApiCall]:
+        """List all remote API call definitions."""
+        ...
+
+    def get_remote_call(self, call_id: str) -> Optional[RemoteApiCall]:
+        """Get a remote API call definition by id."""
+        ...
+
+    def save_remote_call(self, call: RemoteApiCall) -> None:
+        """Create or overwrite a remote API call definition."""
+        ...
+
+    def delete_remote_call(self, call_id: str) -> bool:
+        """Delete a remote API call definition. Returns True if existed."""
         ...

@@ -6,13 +6,19 @@ from pathlib import Path
 _EDITOR_HTML_PATH = Path(__file__).parent / "static" / "editor.html"
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from llm_proxy.generator import generate_network_condition, generate_rules_from_requirement
 from llm_proxy.manager.file_based import FileBasedManager
-from llm_proxy.models import InterceptRule, NetworkCondition, ProxyConfig
+from llm_proxy.models import InterceptRule, NetworkCondition, ProxyConfig, RemoteApiCall
+from llm_proxy.remote_call import (
+    execute_sync as _remote_call_execute_sync,
+    submit_async as _remote_call_submit_async,
+    get_call as _remote_call_get,
+    list_calls as _remote_call_list,
+)
 
 app = FastAPI(title="Beacon Proxy API", version="0.1.0")
 
@@ -27,6 +33,7 @@ def _inline_rule_to_intercept_rule(r: Dict[str, Any]) -> InterceptRule:
         description=r.get("description"),
         status_code=r.get("status_code"),
         body=r.get("body") or r.get("response"),
+        body_file=r.get("body_file"),
         use_regex=r.get("use_regex", False),
         upstream_host=r.get("upstream_host"),
         upstream_port=r.get("upstream_port"),
@@ -41,9 +48,17 @@ def _get_cert_dir() -> Path:
     return Path(os.environ.get("BEACON_PROXY_CONFDIR", os.path.expanduser("~/.mitmproxy")))
 
 
+_MANAGER_CACHE: Dict[str, FileBasedManager] = {}
+
+
 def _get_manager() -> FileBasedManager:
+    """Cached per-rules-path manager so in-memory state (recorded_requests) survives across requests."""
     path = os.environ.get("LLM_PROXY_RULES", "rules.yaml")
-    return FileBasedManager(path, ProxyConfig())
+    mgr = _MANAGER_CACHE.get(path)
+    if mgr is None:
+        mgr = FileBasedManager(path, ProxyConfig())
+        _MANAGER_CACHE[path] = mgr
+    return mgr
 
 
 class NetworkConditionInline(BaseModel):
@@ -309,6 +324,7 @@ class RuleCreate(BaseModel):
     description: Optional[str] = None
     status_code: Optional[int] = None
     body: Optional[str] = None
+    body_file: Optional[str] = None
     use_regex: bool = False
     upstream_host: Optional[str] = None
     upstream_port: Optional[int] = None
@@ -325,6 +341,7 @@ class RuleUpdate(BaseModel):
     description: Optional[str] = None
     status_code: Optional[int] = None
     body: Optional[str] = None
+    body_file: Optional[str] = None
     use_regex: Optional[bool] = None
     upstream_host: Optional[str] = None
     upstream_port: Optional[int] = None
@@ -390,6 +407,7 @@ def create_rule(req: RuleCreate) -> dict:
         description=req.description,
         status_code=req.status_code,
         body=req.body,
+        body_file=req.body_file,
         use_regex=req.use_regex,
         upstream_host=req.upstream_host,
         upstream_port=req.upstream_port,
@@ -451,6 +469,215 @@ def unbind_rule_from_scenario(rule_id: str, scenario_id: str) -> dict:
     if manager.unbind_rule(rule_id, scenario_id):
         return {"ok": True, "message": f"Unbound {rule_id} from {scenario_id}"}
     raise HTTPException(status_code=404, detail=f"Rule {rule_id} not bound to {scenario_id}")
+
+
+# --- 远端 API 调用（出站调用配置，不走 mitmproxy 拦截链路）---
+
+
+class RemoteCallCreate(BaseModel):
+    """Create/update remote API call definition."""
+
+    id: str
+    description: Optional[str] = None
+    method: str = "GET"
+    url: str
+    headers: Optional[Dict[str, str]] = None
+    query_params: Optional[Dict[str, str]] = None
+    body: Optional[Any] = None
+    body_type: str = "json"
+    timeout_ms: int = 10000
+
+
+class RemoteCallUpdate(BaseModel):
+    """Partial update for remote API call."""
+
+    description: Optional[str] = None
+    method: Optional[str] = None
+    url: Optional[str] = None
+    headers: Optional[Dict[str, str]] = None
+    query_params: Optional[Dict[str, str]] = None
+    body: Optional[Any] = None
+    body_type: Optional[str] = None
+    timeout_ms: Optional[int] = None
+
+
+class RemoteCallInvokeRequest(BaseModel):
+    """Invoke request body. variables 注入模板（P1+），timeout_ms 可覆盖。"""
+
+    variables: Optional[Dict[str, Any]] = None
+    client_ip: Optional[str] = None
+    timeout_ms: Optional[int] = None
+
+
+class RemoteCallInvokeInline(RemoteCallCreate):
+    """一次性调用：body 内含完整定义，不落库。id 字段仍必填用于追踪。"""
+
+    variables: Optional[Dict[str, Any]] = None
+    client_ip: Optional[str] = None
+
+
+def _pd_dump(obj, **kwargs):
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(**kwargs)
+    return obj.dict(**{("exclude_none" if k == "exclude_none" else k): v for k, v in kwargs.items()})
+
+
+def _remote_call_to_dict(c: RemoteApiCall) -> dict:
+    return _pd_dump(c)
+
+
+@app.get("/api/remote-calls")
+def list_remote_calls() -> List[dict]:
+    """列出所有远端调用定义。"""
+    manager = _get_manager()
+    return [_remote_call_to_dict(c) for c in manager.list_remote_calls()]
+
+
+# 注意：/calls 与 /calls/{call_id} 必须在 /{call_id} 之前声明，避免路由冲突。
+@app.get("/api/remote-calls/calls")
+def list_remote_call_results(limit: int = 100) -> List[dict]:
+    """最近 N 条调用结果（内存环形 buffer，默认保留 100 条 / 10 分钟）。"""
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 500")
+    return [_pd_dump(r) for r in _remote_call_list(limit)]
+
+
+@app.get("/api/remote-calls/calls/{call_id}")
+def get_remote_call_result(call_id: str) -> dict:
+    """查询单次调用结果。async 模式下轮询用。"""
+    r = _remote_call_get(call_id)
+    if not r:
+        raise HTTPException(status_code=404, detail=f"Call {call_id} not found or expired")
+    return _pd_dump(r)
+
+
+@app.get("/api/remote-calls/{call_id}")
+def get_remote_call(call_id: str) -> dict:
+    """按 id 查询单个远端调用定义。"""
+    manager = _get_manager()
+    c = manager.get_remote_call(call_id)
+    if not c:
+        raise HTTPException(status_code=404, detail=f"Remote call {call_id} not found")
+    return _remote_call_to_dict(c)
+
+
+@app.post("/api/remote-calls", status_code=201)
+def create_remote_call(req: RemoteCallCreate) -> dict:
+    """新增远端调用定义。"""
+    manager = _get_manager()
+    if manager.get_remote_call(req.id):
+        raise HTTPException(status_code=400, detail=f"Remote call {req.id} already exists")
+    call = RemoteApiCall(**_pd_dump(req))
+    manager.save_remote_call(call)
+    return _remote_call_to_dict(call)
+
+
+@app.put("/api/remote-calls/{call_id}")
+def update_remote_call(call_id: str, req: RemoteCallUpdate) -> dict:
+    """更新远端调用定义（部分字段）。"""
+    manager = _get_manager()
+    existing = manager.get_remote_call(call_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Remote call {call_id} not found")
+    updates = _pd_dump(req, exclude_none=True)
+    d = _pd_dump(existing)
+    d.update(updates)
+    updated = RemoteApiCall(**d)
+    manager.save_remote_call(updated)
+    return _remote_call_to_dict(updated)
+
+
+@app.delete("/api/remote-calls/{call_id}")
+def delete_remote_call(call_id: str) -> dict:
+    """删除远端调用定义。"""
+    manager = _get_manager()
+    if manager.delete_remote_call(call_id):
+        return {"ok": True, "message": f"Deleted remote call {call_id}"}
+    raise HTTPException(status_code=404, detail=f"Remote call {call_id} not found")
+
+
+def _build_device_context(
+    manager: FileBasedManager,
+    client_ip: Optional[str],
+    http_req: Optional[Request],
+    caller_variables: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """构建模板变量上下文：用户 variables 平铺 + device.* 子树。
+
+    client_ip 优先级：body.client_ip > HTTP 源 IP。
+    """
+    ctx: Dict[str, Any] = dict(caller_variables or {})
+
+    ip = client_ip
+    if not ip and http_req is not None and http_req.client is not None:
+        ip = http_req.client.host
+
+    device: Dict[str, Any] = {"client_ip": ip or ""}
+    if ip:
+        scenario_id = manager.get_scenario_id_by_client_ip(ip)
+        if scenario_id:
+            device["scenario_id"] = scenario_id
+        last = manager.get_last_request_for_ip(ip)
+        if last:
+            device["last_request"] = {
+                "url": last.get("url", ""),
+                "method": last.get("method", ""),
+                "path": last.get("path", ""),
+                "scenario_id": last.get("scenario_id") or "",
+                "headers": last.get("headers") or {},
+                "query": last.get("query") or {},
+            }
+    ctx["device"] = device
+    return ctx
+
+
+def _invoke(call: RemoteApiCall, ctx: Dict[str, Any], timeout_ms: Optional[int], mode: str) -> dict:
+    if mode == "async":
+        res = _remote_call_submit_async(call, variables=ctx, timeout_ms_override=timeout_ms)
+    else:
+        res = _remote_call_execute_sync(call, variables=ctx, timeout_ms_override=timeout_ms)
+    return _pd_dump(res)
+
+
+@app.post("/api/remote-calls/{call_id}/invoke")
+def invoke_remote_call(
+    call_id: str,
+    req: Optional[RemoteCallInvokeRequest] = None,
+    http_req: Request = None,
+    mode: str = "sync",
+) -> dict:
+    """按 id 触发远端调用。
+
+    ?mode=sync (默认)：阻塞返回最终结果。
+    ?mode=async：立即返回 pending + call_id，稍后用 GET /api/remote-calls/calls/{id} 查询。
+
+    模板变量 = caller variables + device.* 自动上下文。
+    """
+    if mode not in ("sync", "async"):
+        raise HTTPException(status_code=400, detail="mode must be sync or async")
+    manager = _get_manager()
+    call = manager.get_remote_call(call_id)
+    if not call:
+        raise HTTPException(status_code=404, detail=f"Remote call {call_id} not found")
+    client_ip = req.client_ip if req else None
+    variables = req.variables if req else None
+    timeout_ms = req.timeout_ms if req else None
+    ctx = _build_device_context(manager, client_ip, http_req, variables)
+    return _invoke(call, ctx, timeout_ms, mode)
+
+
+@app.post("/api/remote-calls/invoke")
+def invoke_remote_call_inline(
+    req: RemoteCallInvokeInline, http_req: Request = None, mode: str = "sync"
+) -> dict:
+    """一次性触发（不落库）。body 内含完整定义 + variables。支持 ?mode=async。"""
+    if mode not in ("sync", "async"):
+        raise HTTPException(status_code=400, detail="mode must be sync or async")
+    manager = _get_manager()
+    call_fields = {k: v for k, v in _pd_dump(req).items() if k not in ("variables", "client_ip")}
+    call = RemoteApiCall(**call_fields)
+    ctx = _build_device_context(manager, req.client_ip, http_req, req.variables)
+    return _invoke(call, ctx, req.timeout_ms if req.timeout_ms else None, mode)
 
 
 # --- 规则编辑器 ---

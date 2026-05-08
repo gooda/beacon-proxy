@@ -324,6 +324,147 @@ DELETE /api/network-condition                 # 清除所有
 
 > 取消激活（`DELETE /api/activate/ip/{client_ip}`）时会自动清除该 IP 的网络条件。
 
+### 3.10 远端调用（出站 API 编排）
+
+测试脚本通过代理主动触发出站 API 调用（如"重置登录状态"、"初始化测试数据"）。代理作为可配置的出站 HTTP 客户端，**不走 mitmproxy 拦截链路**，与 rules / network_condition 独立管理。
+
+**定位**：
+
+| | rules | network_condition | **remote_calls** |
+|---|---|---|---|
+| 触发方式 | 流量拦截时自动 | IP 绑定后自动 | **按 id 主动触发** |
+| 需要激活 | 是（绑定 IP/场景） | 是（绑定 IP） | **否（definitions 即用）** |
+| 代码路径 | mitmproxy addon | mitmproxy addon | FastAPI endpoint |
+
+#### 3.10.1 定义 CRUD
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/remote-calls` | 列出所有定义 |
+| GET | `/api/remote-calls/{id}` | 查询单个定义 |
+| POST | `/api/remote-calls` | 新增定义（201） |
+| PUT | `/api/remote-calls/{id}` | 部分更新 |
+| DELETE | `/api/remote-calls/{id}` | 删除 |
+
+**定义字段**（`RemoteApiCall`）：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| id | string | 唯一 id，如 `reset_login` |
+| description | string? | 用途说明 |
+| method | enum | GET / POST / PUT / DELETE / PATCH |
+| url | string | 完整 URL，支持 `{{var}}` 模板 |
+| headers | map? | 请求头，value 支持 `{{var}}` |
+| query_params | map? | query 参数，value 支持 `{{var}}` |
+| body | string \| object? | 请求体 |
+| body_type | enum | `json`（默认） / `text` / `form` |
+| timeout_ms | int | 超时时间，默认 10000 |
+
+**存储**：目录模式下位于 `rules/remote_calls/{id}.yaml`；单文件模式下位于 `rules.yaml` 同级目录的 `remote_calls/`。
+
+#### 3.10.2 触发调用
+
+```
+POST /api/remote-calls/{id}/invoke?mode=sync|async     # 默认 sync
+POST /api/remote-calls/invoke?mode=sync|async          # 一次性调用（body 内含完整定义，不落库）
+```
+
+**请求体**：
+
+```json
+{
+  "variables": { "user_id": "12345", "trace_id": "abc" },
+  "client_ip": "10.0.0.5",
+  "timeout_ms": 5000
+}
+```
+
+- `variables`：注入模板（`{{user_id}}` 等）
+- `client_ip`：用于构建 device 上下文。不传时使用 HTTP 源 IP 回退
+- `timeout_ms`：临时覆盖定义里的 timeout_ms
+
+**sync 响应（成功）**：
+
+```json
+{
+  "ok": true,
+  "call_id": "rc_ab12cd34",
+  "status": "success",
+  "status_code": 200,
+  "headers": {...},
+  "body": {...},
+  "duration_ms": 432,
+  "request_url": "https://api-test.example.com/user/12345/reset",
+  "started_at": "2026-05-08T10:12:34.567+00:00"
+}
+```
+
+**sync 响应（远端 5xx / 超时 / 网络错误，HTTP 层仍 200）**：
+
+```json
+{
+  "ok": false,
+  "call_id": "rc_ab12cd34",
+  "status": "failed",
+  "status_code": 504,
+  "error": "upstream_timeout",
+  "error_detail": "Read timeout after 5000ms",
+  "duration_ms": 5001
+}
+```
+
+`error` 枚举：`upstream_error` / `upstream_timeout` / `network_error` / `too_many_pending`。
+
+**async 响应（立即返回）**：
+
+```json
+{ "ok": true, "call_id": "rc_ab12cd34", "status": "pending" }
+```
+
+后续通过 `GET /api/remote-calls/calls/{call_id}` 轮询；状态从 `pending → success | failed`。
+
+#### 3.10.3 调用记录查询
+
+```
+GET /api/remote-calls/calls?limit=100                 # 最近 N 条（1 ≤ limit ≤ 500）
+GET /api/remote-calls/calls/{call_id}                 # 单次结果，async 轮询用
+```
+
+内存环形 buffer，**最近 100 条 / 10 分钟 TTL**，不持久化。异步并发上限 50，超出时立即返回 `error: too_many_pending`。
+
+#### 3.10.4 模板变量上下文
+
+invoke 时的上下文 = 调用方 `variables` + 自动注入的 `device.*` 子树：
+
+| 变量 | 含义 | 来源 |
+|---|---|---|
+| `{{device.client_ip}}` | 设备 IP | body.client_ip 或 HTTP 源 IP |
+| `{{device.scenario_id}}` | 当前激活的 scenario | `activations.yaml` |
+| `{{device.last_request.path}}` | 最近一次被代理的请求 path | 内存 `recorded_requests` 按 IP 过滤 |
+| `{{device.last_request.method}}` | 最近一次请求的 method | 同上 |
+| `{{device.last_request.url}}` | 最近一次请求的 URL | 同上 |
+| `{{device.last_request.headers.<name>}}` | header 值（小写 key） | 同上 |
+| `{{device.last_request.query.<name>}}` | query 参数 | 同上 |
+
+**示例**：复用设备最近请求的 Authorization header，无需测试脚本手动抓 token：
+
+```yaml
+# rules/remote_calls/reset_login.yaml
+id: reset_login
+description: 重置用户登录状态
+method: POST
+url: https://api-test.example.com/user/reset
+headers:
+  Authorization: "{{device.last_request.headers.authorization}}"
+  X-Client-IP: "{{device.client_ip}}"
+body:
+  reason: automation
+body_type: json
+timeout_ms: 10000
+```
+
+未解析的变量保留为 `{{var}}` 字面量，同时在 `error_detail` 中列出未解析的变量名（仅警告，不阻断）。
+
 ---
 
 ## 4. 调用流程示例
@@ -350,7 +491,18 @@ DELETE /api/network-condition                 # 清除所有
 5. 用例结束：DELETE /api/activate/ip/192.168.1.101（同时清除网络条件）
 ```
 
-### 4.3 浏览器场景（X-Scenario-ID）
+### 4.3 测试中触发远端调用（出站 API 编排）
+
+```text
+1. 在代理侧预先注册调用定义：POST /api/remote-calls
+   （URL/headers 可用 {{var}} 和 {{device.*}} 模板，避免在脚本里硬编码 token）
+2. 测试用例执行中需要重置状态时：POST /api/remote-calls/{id}/invoke
+   传入 variables 和 client_ip（设备 IP，用于构建 device 上下文）
+3. 同步模式直接取响应；异步模式用返回的 call_id 轮询 GET /api/remote-calls/calls/{call_id}
+4. 需要复盘时：GET /api/remote-calls/calls?limit=N 查看最近调用记录
+```
+
+### 4.4 浏览器场景（X-Scenario-ID）
 
 ```text
 1. 配置浏览器/Playwright 使用代理 127.0.0.1:8080
@@ -616,6 +768,25 @@ curl -X POST http://127.0.0.1:8765/api/activate \
 
 # 清除网络条件
 curl -X DELETE http://127.0.0.1:8765/api/network-condition/192.168.1.101
+
+# 注册远端调用定义
+curl -X POST http://127.0.0.1:8765/api/remote-calls \
+  -H "Content-Type: application/json" \
+  -d '{"id":"reset_login","method":"POST","url":"https://api-test.example.com/user/{{user_id}}/reset"}'
+
+# 同步触发
+curl -X POST http://127.0.0.1:8765/api/remote-calls/reset_login/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"variables":{"user_id":"12345"},"client_ip":"192.168.1.101"}'
+
+# 异步触发 + 轮询
+CALL_ID=$(curl -sX POST 'http://127.0.0.1:8765/api/remote-calls/reset_login/invoke?mode=async' \
+  -H "Content-Type: application/json" \
+  -d '{"variables":{"user_id":"12345"}}' | jq -r .call_id)
+curl http://127.0.0.1:8765/api/remote-calls/calls/$CALL_ID
+
+# 查看最近调用
+curl 'http://127.0.0.1:8765/api/remote-calls/calls?limit=20'
 ```
 
 ### Python

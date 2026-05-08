@@ -131,6 +131,40 @@ curl -X POST http://127.0.0.1:8765/api/activate \
   -d '{"scenario_id":"scenario_A","client_ip":"192.168.1.101"}'
 ```
 
+### 4.5 远端调用（出站 API 编排）
+
+测试用例执行时主动触发出站 API 调用（如"重置登录状态"、"初始化测试数据"）。代理作为可配置出站 HTTP 客户端，**与 rules / network_condition 独立管理**，不走拦截链路。
+
+```bash
+# 注册定义（支持 {{var}} 模板）
+curl -X POST http://127.0.0.1:8765/api/remote-calls \
+  -H "Content-Type: application/json" \
+  -d '{"id":"reset_login","method":"POST","url":"https://api-test.example.com/user/{{user_id}}/reset"}'
+
+# 同步触发
+curl -X POST http://127.0.0.1:8765/api/remote-calls/reset_login/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"variables":{"user_id":"12345"},"client_ip":"192.168.1.101"}'
+```
+
+| 字段 | 说明 |
+|------|------|
+| id | 唯一 id |
+| method | GET / POST / PUT / DELETE / PATCH |
+| url | 完整 URL，支持 `{{var}}` |
+| headers / query_params | value 支持 `{{var}}` |
+| body | 请求体 |
+| body_type | json（默认） / text / form |
+| timeout_ms | 默认 10000 |
+
+**模板变量**：`{{caller_var}}` + 自动注入的 `device.client_ip` / `device.scenario_id` / `device.last_request.{path,method,headers.<n>,query.<n>}`。
+
+**模式**：`?mode=sync`（默认，阻塞返回结果） / `?mode=async`（立即返回 `call_id`，用 `GET /api/remote-calls/calls/{id}` 轮询）。
+
+**错误透传**：远端 5xx / 超时 / 网络错误时 HTTP 仍 200，业务语义看 `ok` / `error` 字段。
+
+详见 [INTEGRATION.md 3.10 远端调用](INTEGRATION.md)。
+
 ---
 
 ## 五、规则结构
@@ -175,26 +209,73 @@ overrides: {}
 
 ## 六、CLI 命令参考
 
+### 规则管理
+
 | 命令 | 说明 |
-|------|------|
-| `beacon-proxy start` | 启动代理 |
-| `beacon-proxy api` | 启动 API 服务 |
-| `beacon-proxy add-rule <url>` | 添加拦截规则 |
-| `beacon-proxy add-rewrite <from> <to>` | 添加域名重写 |
-| `beacon-proxy remove-rule <id>` | 删除规则 |
-| `beacon-proxy list-rules [-d scenario_id]` | 列出规则 |
-| `beacon-proxy list-definitions` | 列出所有定义 |
-| `beacon-proxy bind-rule <rule_id> <scenario_id>` | 绑定规则到场景 |
-| `beacon-proxy unbind-rule <rule_id> <scenario_id>` | 从场景解绑 |
+|---|---|
+| `add-rule <url_pattern>` | 添加 Mock 规则 |
+| `add-rewrite <from_host> <to_host>` | 添加域名重写规则 |
+| `remove-rule <rule_id> [-d <scenario>]` | 删除定义 / 从场景解绑 |
+| `bind-rule <rule_id> <scenario_id>` | 绑定规则到场景 |
+| `unbind-rule <rule_id> <scenario_id>` | 从场景解绑 |
+| `list-definitions` | 列出所有定义 |
+| `list-rules [-d <scenario>]` | 列出某场景的规则 |
+
+### 激活管理
+
+| 命令 | 说明 |
+|---|---|
+| `activate <scenario_id> <client_ip> [--rule-ids id1,id2]` | IP ↔ 场景绑定 |
+| `deactivate --scenario <id>\|--ip <ip>\|--all` | 取消激活 |
+| `list-activations` | 列出所有激活 |
+
+### 网络条件
+
+| 命令 | 说明 |
+|---|---|
+| `set-net-condition <client_ip> --preset airplane\|3g\|4g\|latency` | 预设 |
+| `set-net-condition <client_ip> --airplane / --delay / --throttle / --loss` | 自定义 |
+| `clear-net-condition --ip <ip>\|--all` | 清除 |
+| `list-net-conditions` | 列出所有 IP 的网络条件 |
+
+### 自然语言生成
+
+| 命令 | 说明 |
+|---|---|
+| `generate <requirement> --ip <client_ip> [--scenario <id>]` | 解析需求生成规则或网络条件并激活 |
+
+### 远端调用
+
+| 命令 | 说明 |
+|---|---|
+| `remote-call add <id> -u <url> [-X METHOD] [-H K=V]... [-q K=V]... [-b BODY] [--body-type json\|text\|form] [--timeout MS] [-D DESC]` | 新增定义 |
+| `remote-call update <id> [...]` | 部分更新（仅提供的字段） |
+| `remote-call list` | 列出所有定义 |
+| `remote-call get <id>` | 查看单个定义（JSON） |
+| `remote-call delete <id>` | 删除定义 |
+| `remote-call invoke <id> [--var K=V]... [--client-ip IP] [--async] [--api-url URL]` | 触发调用（走 HTTP） |
+| `remote-call calls [-n N] [--api-url URL]` | 最近 N 条调用记录 |
+| `remote-call get-call <call_id> [--api-url URL]` | 查询单次调用结果（async 轮询用） |
+
+> **说明**：`invoke` / `calls` / `get-call` 必须走 HTTP（`--api-url` 默认 `http://127.0.0.1:8765`），因为 device 上下文、async 任务池、调用记录 buffer 都活在运行中的 API 进程里。其他命令直接读写 `rules/` 目录（与代理共享文件态）。
+
+### 服务启动
+
+| 命令 | 说明 |
+|---|---|
+| `beacon-proxy start [-p PORT] [--with-api] [--web] [-k] [--ignore-hosts ...]` | 启动代理（可选同时启 API） |
+| `beacon-proxy api [-p PORT] [-H HOST]` | 单独启动 REST API |
 
 **常用选项**：
 
 | 选项 | 说明 |
-|------|------|
+|---|---|
 | `-p, --port` | 代理端口（默认 8080） |
-| `-d, --scenario-id` | 场景 ID（绑定/解绑时使用） |
+| `-d, --scenario-id` | 场景 ID（规则命令使用） |
 | `--rules <path>` | 规则文件或目录路径 |
 | `--with-api` | 同时启动 API |
+| `-k, --ssl-insecure` | 跳过上游证书校验（IP 直连/HTTPDNS） |
+| `--ignore-hosts` | 正则，放行不拦截（证书固定 App） |
 
 ---
 
@@ -242,6 +323,20 @@ overrides: {}
 | GET | /api/scenarios | 列出场景 |
 | POST | /api/scenarios | 新建场景 |
 
+### 远端调用
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/remote-calls | 列出所有定义 |
+| GET | /api/remote-calls/{id} | 查询单个定义 |
+| POST | /api/remote-calls | 新增定义 |
+| PUT | /api/remote-calls/{id} | 部分更新 |
+| DELETE | /api/remote-calls/{id} | 删除 |
+| POST | /api/remote-calls/{id}/invoke?mode=sync\|async | 按 id 触发 |
+| POST | /api/remote-calls/invoke?mode=sync\|async | 一次性触发（不落库） |
+| GET | /api/remote-calls/calls?limit=N | 最近 N 条调用记录 |
+| GET | /api/remote-calls/calls/{call_id} | 单次调用结果（async 轮询用） |
+
 ### 其他
 
 | 路径 | 说明 |
@@ -253,12 +348,21 @@ overrides: {}
 
 ## 八、规则编辑器
 
-访问 `http://<host>:8765/rules` 或 `/editor`：
+访问 `http://<host>:8765/rules` 或 `/editor`，包含三个 Tab：
 
+**规则配置**
 - **场景列表**：切换场景、新建场景
 - **规则列表**：查看、编辑、删除当前场景规则
 - **规则表单**：新增/编辑规则，支持 Mock 响应、域名重写、网络模拟（延迟/限速/丢包）
-- **激活状态**：查看 IP↔场景映射，激活、取消激活，快捷设置网络条件（飞行模式/弱网3G/4G/高延迟）
+
+**规则应用**
+- 查看 IP↔场景映射，激活、取消激活
+- 快捷设置网络条件（飞行模式 / 弱网 3G / 4G / 高延迟）
+
+**远端调用**
+- 调用定义 CRUD
+- 编辑表单 + 「同步触发」/「异步触发」按钮，所见即所测
+- 「最近调用」面板展示内存 buffer 中的调用历史
 
 适用于 rules 目录模式。
 
@@ -314,6 +418,26 @@ curl -X POST http://127.0.0.1:8765/api/generate \
 ```
 
 支持：`飞行模式`、`弱网`、`弱网3G`、`弱网4G`、`高延迟`、`登录失败`、`购物车空`、`X 返回 Y`、`X 空`、直接 URL 等。
+
+### 场景 6：测试用例中触发远端调用
+
+```bash
+# 1) 预注册调用定义（URL/headers 可用 {{var}} 或 {{device.*}} 模板）
+curl -X POST http://127.0.0.1:8765/api/remote-calls \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id":"reset_login","method":"POST",
+    "url":"https://api-test.example.com/user/{{user_id}}/reset",
+    "headers":{"Authorization":"{{device.last_request.headers.authorization}}"}
+  }'
+
+# 2) 用例中需要重置登录态时
+curl -X POST http://127.0.0.1:8765/api/remote-calls/reset_login/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"variables":{"user_id":"12345"},"client_ip":"192.168.1.101"}'
+```
+
+**适用**：自动化用例需要反复清理/初始化后端状态但不想在脚本里硬编码远端地址和鉴权。调用历史可在编辑器「远端调用」Tab 查看。
 
 ---
 

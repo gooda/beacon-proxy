@@ -5,6 +5,8 @@ import re
 import time
 from typing import TYPE_CHECKING, Optional
 
+from mitmproxy import ctx
+
 from llm_proxy.models import InterceptRule
 
 if TYPE_CHECKING:
@@ -68,7 +70,7 @@ class LLMProxyAddon:
                     flow.request.headers["Host"] = rule.upstream_host
                 break
 
-        # 4. 记录请求
+        # 4. 记录请求（含 client_ip / headers / query，供远端调用模板的 device 上下文使用）
         try:
             self.manager.record_request(
                 {
@@ -76,6 +78,10 @@ class LLMProxyAddon:
                     "method": flow.request.method,
                     "path": flow.request.path,
                     "scenario_id": self._get_scenario_id(flow),
+                    "client_ip": client_ip,
+                    "headers": {k.lower(): v for k, v in dict(flow.request.headers).items()},
+                    "query": dict(flow.request.query) if flow.request.query else {},
+                    "ts": time.time(),
                 }
             )
         except Exception:
@@ -106,10 +112,19 @@ class LLMProxyAddon:
             if self._match_url(url, rule):
                 if rule.status_code is not None:
                     flow.response.status_code = rule.status_code
-                if rule.body is not None:
-                    content = rule.body
-                    if isinstance(content, str):
-                        content = content.encode("utf-8")
+                content: Optional[bytes] = None
+                if rule.body_file:
+                    try:
+                        path = self.manager.resolve_body_file_path(rule.body_file)
+                        content = path.read_bytes()
+                        if path.suffix.lower() in (".html", ".htm"):
+                            flow.response.headers["Content-Type"] = "text/html; charset=utf-8"
+                    except OSError as e:
+                        ctx.log.warn(f"beacon-proxy: body_file unreadable ({rule.body_file}): {e}")
+                elif rule.body is not None:
+                    raw = rule.body
+                    content = raw.encode("utf-8") if isinstance(raw, str) else raw
+                if content is not None:
                     flow.response.content = content
                 if rule.delay_ms is not None:
                     effective_delay_ms = rule.delay_ms

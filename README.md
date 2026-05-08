@@ -45,6 +45,38 @@ pip install -r requirements.txt && pip install .
 ./scripts/start.sh
 ```
 
+### 脚本部署（推荐）
+
+使用 `deploy.sh` 自动打包、传输、安装并启动，支持远程和本地部署：
+
+```bash
+# 部署到远程服务器（从 deploy.conf 读取配置）
+./scripts/deploy.sh jenkins --start
+
+# 部署到本地目录
+./scripts/deploy.sh local --start
+
+# 列出所有部署目标
+./scripts/deploy.sh --list
+```
+
+部署后目录结构：
+
+```
+<部署目录>/
+├── app/        # 代码（每次部署覆盖）
+├── config/     # 规则 + 激活（持久化）
+└── venv/       # Python 虚拟环境（持久化）
+```
+
+部署后在服务器上手动启动：
+
+```bash
+cd <部署目录>
+source venv/bin/activate
+./app/scripts/start.sh
+```
+
 ## 使用
 
 ### 快速启动
@@ -58,6 +90,8 @@ pip install -r requirements.txt && pip install .
 ```
 
 ### CLI
+
+CLI 命令分为：**规则管理**（add-rule/add-rewrite/remove-rule/bind-rule/unbind-rule/list-rules/list-definitions）、**激活与网络条件**（activate/deactivate/list-activations/set-net-condition/clear-net-condition/list-net-conditions）、**自然语言生成**（generate）、**远端调用**（`remote-call add/list/get/update/delete/invoke/calls/get-call`）、**服务启动**（start/api）。完整列表见 [TOOL_GUIDE.md 六、CLI 命令参考](docs/TOOL_GUIDE.md)。
 
 ```bash
 # 启动代理（默认端口 8080）
@@ -74,6 +108,19 @@ beacon-proxy list-rules
 
 # 删除规则
 beacon-proxy remove-rule rule_1
+
+# 激活 / 网络条件
+beacon-proxy activate scenario_A 192.168.1.101
+beacon-proxy set-net-condition 192.168.1.101 --preset 3g
+beacon-proxy list-activations
+
+# 自然语言生成
+beacon-proxy generate "登录失败" --ip 192.168.1.101
+
+# 远端调用
+beacon-proxy remote-call add reset_login -X POST -u https://api-test.example.com/user/{{user_id}}/reset
+beacon-proxy remote-call invoke reset_login --var user_id=42 --client-ip 192.168.1.101
+beacon-proxy remote-call calls -n 20
 ```
 
 ### 规则文件
@@ -139,7 +186,11 @@ beacon-proxy api
 ## 八、规则编辑器
 
 ![规则编辑器](http://dap-ai.fp.ps.netease.com/file/69ba74d3dbc5625e5b9cb461533QuEFe07)
-访问 `http://<host>:8765/rules` 或 `/editor`：
+访问 `http://<host>:8765/rules` 或 `/editor`，包含三个 Tab：
+
+- **规则配置**：场景与规则的 CRUD（Mock 响应、域名重写、规则级网络模拟）
+- **规则应用**：IP↔场景激活，快捷设置网络条件（飞行模式/弱网3G/4G/高延迟）
+- **远端调用**：调用定义 CRUD + 同步/异步触发 + 最近调用历史
 
 **API 示例：**
 
@@ -194,6 +245,49 @@ curl http://127.0.0.1:8765/api/network-condition
 ```
 
 也可在规则级别对特定接口设置延迟/限速/丢包，详见 [INTEGRATION.md](docs/INTEGRATION.md)。
+
+### 远端调用（出站 API 编排）
+
+测试用例执行时主动触发出站 API 调用（如「重置登录状态」「初始化测试数据」）。代理服务作为可配置的出站 HTTP 客户端，**不走 mitmproxy 拦截链路**，与 rules / network_condition 独立管理。
+
+```bash
+# 1) 注册一个调用定义（支持 {{var}} 模板 + device 上下文变量）
+curl -X POST http://127.0.0.1:8765/api/remote-calls \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "reset_login",
+    "method": "POST",
+    "url": "https://api-test.example.com/user/{{user_id}}/reset",
+    "headers": {"Authorization": "{{device.last_request.headers.authorization}}"}
+  }'
+
+# 2) 同步触发（默认）
+curl -X POST http://127.0.0.1:8765/api/remote-calls/reset_login/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"variables":{"user_id":"12345"},"client_ip":"10.0.0.5"}'
+
+# 3) 异步触发 + 轮询结果
+CALL_ID=$(curl -sX POST 'http://127.0.0.1:8765/api/remote-calls/reset_login/invoke?mode=async' \
+  -d '{"variables":{"user_id":"12345"}}' -H "Content-Type: application/json" | jq -r .call_id)
+curl http://127.0.0.1:8765/api/remote-calls/calls/$CALL_ID
+
+# 4) 一次性调用（不落库）
+curl -X POST http://127.0.0.1:8765/api/remote-calls/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"id":"once","method":"GET","url":"https://api/health"}'
+```
+
+**模板变量**：
+- `{{ caller_var }}` — invoke body 里 `variables` 注入
+- `{{ device.client_ip }}` / `{{ device.scenario_id }}` — 自动从激活信息取
+- `{{ device.last_request.path }}` / `{{ device.last_request.headers.<name> }}` — 自动从该 IP 最近一次被代理的请求取（适合复用 token、trace id）
+
+**特性**：
+- HTTP 层错误透传（远端 5xx / 超时 / 网络错误）始终返回 200 + `ok:false` + `error` 字段
+- async 模式立即返回 `call_id`（pending），通过 `GET /api/remote-calls/calls/{id}` 轮询
+- 调用历史保留在内存环形 buffer（最近 100 条 / 10 分钟 TTL），可通过 `GET /api/remote-calls/calls` 查看
+
+详细 API 与字段定义见 [INTEGRATION.md 3.10 远端调用](docs/INTEGRATION.md)。
 
 ### Mock 数据示例
 

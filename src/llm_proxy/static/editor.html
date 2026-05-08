@@ -285,6 +285,7 @@
       <div class="header-tabs">
         <button id="tab-config" class="active" onclick="switchView('config')">规则配置</button>
         <button id="tab-apply" onclick="switchView('apply')">规则应用</button>
+        <button id="tab-remote" onclick="switchView('remote')">远端调用</button>
       </div>
       <div class="btns">
         <button class="btn btn-ghost" onclick="refresh()">刷新</button>
@@ -369,6 +370,82 @@
         <div style="display:flex; gap:var(--space-sm); margin-top:var(--space-lg);">
           <button class="btn-add" onclick="showActivateModal()" style="flex:1;margin:0;">+ 激活场景</button>
           <button class="btn-add" onclick="showNetConditionModal()" style="flex:1;margin:0;">+ 设置网络条件</button>
+        </div>
+      </div>
+    </div>
+    <div id="view-remote" class="hidden">
+      <div class="main">
+        <div class="panel">
+          <h3>远端调用</h3>
+          <div id="remote-list"></div>
+          <button class="btn-add" onclick="startAddRemote()">+ 新建调用</button>
+        </div>
+        <div id="panel-remote-edit" class="panel panel-edit">
+          <h3 id="remote-edit-title">编辑调用</h3>
+          <div id="remote-form-msg"></div>
+          <div class="form-group">
+            <label>ID</label>
+            <input id="rc-id" placeholder="reset_login" />
+          </div>
+          <div class="form-group">
+            <label>描述</label>
+            <input id="rc-desc" placeholder="重置用户登录状态" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>方法</label>
+              <select id="rc-method">
+                <option>GET</option><option>POST</option><option>PUT</option>
+                <option>DELETE</option><option>PATCH</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>超时 (ms)</label>
+              <input id="rc-timeout" type="number" placeholder="10000" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label>URL（支持 {{var}} 模板）</label>
+            <input id="rc-url" placeholder="https://api.test/user/{{user_id}}/reset" />
+          </div>
+          <div class="form-group">
+            <label>Headers (JSON，可选)</label>
+            <textarea id="rc-headers" placeholder='{"X-Trace":"{{trace_id}}"}'></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Body 类型</label>
+              <select id="rc-body-type">
+                <option value="json">json</option>
+                <option value="text">text</option>
+                <option value="form">form</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Body（可选）</label>
+            <textarea id="rc-body" placeholder='{"reason":"automation"}'></textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" onclick="saveRemote()">保存</button>
+            <button class="btn btn-ghost" onclick="cancelRemoteEdit()">取消</button>
+          </div>
+          <div class="form-section-title" style="margin-top:var(--space-lg);">立即触发</div>
+          <div class="form-group">
+            <label>client_ip（可选，用于 device 上下文）</label>
+            <input id="rc-invoke-ip" placeholder="10.0.0.5" />
+          </div>
+          <div class="form-group">
+            <label>variables (JSON，可选)</label>
+            <textarea id="rc-invoke-vars" placeholder='{"user_id":"12345"}'></textarea>
+          </div>
+          <div class="form-actions">
+            <button class="btn btn-primary" onclick="invokeRemote('sync')">同步触发</button>
+            <button class="btn btn-ghost" onclick="invokeRemote('async')">异步触发</button>
+          </div>
+          <div id="remote-invoke-result" style="margin-top:var(--space-md);"></div>
+          <div class="form-section-title" style="margin-top:var(--space-lg);">最近调用</div>
+          <div id="remote-calls-log"></div>
         </div>
       </div>
     </div>
@@ -458,12 +535,13 @@
     let formMode = 'mock';
 
     function switchView(view) {
-      const isConfig = view === 'config';
-      document.getElementById('view-config').classList.toggle('hidden', !isConfig);
-      document.getElementById('view-apply').classList.toggle('hidden', isConfig);
-      document.getElementById('tab-config').classList.toggle('active', isConfig);
-      document.getElementById('tab-apply').classList.toggle('active', !isConfig);
-      if (!isConfig) loadActivations();
+      const views = ['config', 'apply', 'remote'];
+      views.forEach(v => {
+        document.getElementById('view-' + v).classList.toggle('hidden', v !== view);
+        document.getElementById('tab-' + v).classList.toggle('active', v === view);
+      });
+      if (view === 'apply') loadActivations();
+      if (view === 'remote') { loadRemoteCalls(); loadRemoteCallsLog(); }
     }
 
     function formatApiError(err) {
@@ -938,6 +1016,204 @@
       loadScenarios();
       loadRules();
       loadActivations();
+      loadRemoteCalls();
+      loadRemoteCallsLog();
+    }
+
+    // --- 远端调用 ---
+    let editingRemoteId = null;
+
+    async function loadRemoteCalls() {
+      const el = document.getElementById('remote-list');
+      try {
+        const list = await fetchJson('/api/remote-calls');
+        if (!list.length) {
+          el.innerHTML = '<div class="empty"><strong>暂无远端调用</strong><br>点击下方按钮新建</div>';
+          return;
+        }
+        el.innerHTML = list.map(c => {
+          const id = escapeAttr(c.id);
+          const desc = c.description ? ' — ' + escapeHtml(c.description) : '';
+          return `<div class="rule-row" data-rc-id="${id}" onclick="editRemote(this.dataset.rcId)" tabindex="0" role="button">
+            <span class="id">${escapeHtml(c.id)}</span>
+            <span class="pattern">${escapeHtml(c.method)} ${escapeHtml(c.url)}${desc}</span>
+            <div class="actions" onclick="event.stopPropagation()">
+              <button class="btn btn-ghost" data-rc-id="${id}" onclick="editRemote(this.dataset.rcId)">编辑</button>
+              <button class="btn btn-danger" data-rc-id="${id}" onclick="deleteRemote(this.dataset.rcId)">删除</button>
+            </div>
+          </div>`;
+        }).join('');
+      } catch (e) {
+        el.innerHTML = '<div class="msg err">' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    function startAddRemote() {
+      editingRemoteId = null;
+      document.getElementById('remote-edit-title').textContent = '新建调用';
+      ['rc-id','rc-desc','rc-url','rc-headers','rc-body','rc-invoke-ip','rc-invoke-vars'].forEach(i => document.getElementById(i).value = '');
+      document.getElementById('rc-method').value = 'GET';
+      document.getElementById('rc-body-type').value = 'json';
+      document.getElementById('rc-timeout').value = '10000';
+      document.getElementById('rc-id').disabled = false;
+      document.getElementById('remote-invoke-result').innerHTML = '';
+    }
+
+    async function editRemote(id) {
+      try {
+        const c = await fetchJson('/api/remote-calls/' + encodeURIComponent(id));
+        editingRemoteId = id;
+        document.getElementById('remote-edit-title').textContent = '编辑 ' + id;
+        document.getElementById('rc-id').value = c.id;
+        document.getElementById('rc-id').disabled = true;
+        document.getElementById('rc-desc').value = c.description || '';
+        document.getElementById('rc-method').value = c.method;
+        document.getElementById('rc-url').value = c.url;
+        document.getElementById('rc-headers').value = c.headers ? JSON.stringify(c.headers, null, 2) : '';
+        document.getElementById('rc-body-type').value = c.body_type || 'json';
+        document.getElementById('rc-body').value = c.body ? (typeof c.body === 'string' ? c.body : JSON.stringify(c.body, null, 2)) : '';
+        document.getElementById('rc-timeout').value = c.timeout_ms;
+        document.getElementById('remote-invoke-result').innerHTML = '';
+      } catch (e) {
+        showRemoteMsg(e.message, true);
+      }
+    }
+
+    function _parseJsonOrNull(s, label) {
+      const t = (s || '').trim();
+      if (!t) return null;
+      try { return JSON.parse(t); } catch (e) { throw new Error(label + ' 不是合法 JSON：' + e.message); }
+    }
+
+    function _collectRemoteForm() {
+      const id = document.getElementById('rc-id').value.trim();
+      if (!id) throw new Error('ID 不能为空');
+      const url = document.getElementById('rc-url').value.trim();
+      if (!url) throw new Error('URL 不能为空');
+      const bodyType = document.getElementById('rc-body-type').value;
+      let body = null;
+      const bodyRaw = document.getElementById('rc-body').value.trim();
+      if (bodyRaw) {
+        body = bodyType === 'json' ? _parseJsonOrNull(bodyRaw, 'body') : bodyRaw;
+      }
+      return {
+        id,
+        description: document.getElementById('rc-desc').value.trim() || null,
+        method: document.getElementById('rc-method').value,
+        url,
+        headers: _parseJsonOrNull(document.getElementById('rc-headers').value, 'headers'),
+        body,
+        body_type: bodyType,
+        timeout_ms: parseInt(document.getElementById('rc-timeout').value, 10) || 10000,
+      };
+    }
+
+    async function saveRemote() {
+      try {
+        const payload = _collectRemoteForm();
+        if (editingRemoteId) {
+          const { id, ...patch } = payload;
+          await fetchJson('/api/remote-calls/' + encodeURIComponent(editingRemoteId), {
+            method: 'PUT', body: JSON.stringify(patch),
+          });
+          showRemoteMsg('已更新');
+        } else {
+          await fetchJson('/api/remote-calls', { method: 'POST', body: JSON.stringify(payload) });
+          showRemoteMsg('已创建');
+        }
+        loadRemoteCalls();
+      } catch (e) {
+        showRemoteMsg(e.message, true);
+      }
+    }
+
+    async function deleteRemote(id) {
+      if (!confirm('确定删除调用 ' + id + '？')) return;
+      try {
+        await fetchJson('/api/remote-calls/' + encodeURIComponent(id), { method: 'DELETE' });
+        if (editingRemoteId === id) cancelRemoteEdit();
+        loadRemoteCalls();
+      } catch (e) {
+        showRemoteMsg(e.message, true);
+      }
+    }
+
+    function cancelRemoteEdit() {
+      startAddRemote();
+    }
+
+    async function invokeRemote(mode) {
+      const resultEl = document.getElementById('remote-invoke-result');
+      resultEl.innerHTML = '<div class="msg">调用中...</div>';
+      try {
+        const clientIp = document.getElementById('rc-invoke-ip').value.trim() || null;
+        const variables = _parseJsonOrNull(document.getElementById('rc-invoke-vars').value, 'variables');
+        let result;
+        if (editingRemoteId) {
+          result = await fetchJson('/api/remote-calls/' + encodeURIComponent(editingRemoteId) + '/invoke?mode=' + mode, {
+            method: 'POST', body: JSON.stringify({ client_ip: clientIp, variables }),
+          });
+        } else {
+          const payload = _collectRemoteForm();
+          payload.client_ip = clientIp;
+          payload.variables = variables;
+          result = await fetchJson('/api/remote-calls/invoke?mode=' + mode, {
+            method: 'POST', body: JSON.stringify(payload),
+          });
+        }
+        renderInvokeResult(result, mode);
+        loadRemoteCallsLog();
+      } catch (e) {
+        resultEl.innerHTML = '<div class="msg err">' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    function renderInvokeResult(result, mode) {
+      const el = document.getElementById('remote-invoke-result');
+      const cls = result.ok ? 'ok' : 'err';
+      const body = JSON.stringify(result, null, 2);
+      el.innerHTML = `<div class="msg ${cls}">${escapeHtml('call_id=' + result.call_id + ' status=' + result.status + (result.status_code ? ' http=' + result.status_code : '') + (result.error ? ' error=' + result.error : ''))}</div>
+        <pre style="max-height:240px;overflow:auto;background:var(--bg-secondary,#f5f5f5);padding:8px;border-radius:4px;white-space:pre-wrap;">${escapeHtml(body)}</pre>`;
+      if (mode === 'async' && result.status === 'pending') {
+        pollAsyncResult(result.call_id);
+      }
+    }
+
+    async function pollAsyncResult(callId) {
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        try {
+          const r = await fetchJson('/api/remote-calls/calls/' + encodeURIComponent(callId));
+          if (r.status !== 'pending') {
+            renderInvokeResult(r, 'sync');
+            loadRemoteCallsLog();
+            return;
+          }
+        } catch (e) { return; }
+      }
+    }
+
+    async function loadRemoteCallsLog() {
+      const el = document.getElementById('remote-calls-log');
+      if (!el) return;
+      try {
+        const list = await fetchJson('/api/remote-calls/calls?limit=20');
+        if (!list.length) { el.innerHTML = '<div class="empty">暂无调用记录</div>'; return; }
+        el.innerHTML = list.map(r => {
+          const cls = r.ok ? 'ok' : 'err';
+          const line = `${r.call_id} · ${r.status}${r.status_code ? ' · HTTP ' + r.status_code : ''}${r.duration_ms != null ? ' · ' + r.duration_ms + 'ms' : ''}${r.error ? ' · ' + r.error : ''}`;
+          const url = r.request_url || '';
+          return `<div class="msg ${cls}" style="margin-bottom:4px;"><code>${escapeHtml(line)}</code><br><small>${escapeHtml(url)}</small></div>`;
+        }).join('');
+      } catch (e) {
+        el.innerHTML = '<div class="msg err">' + escapeHtml(e.message) + '</div>';
+      }
+    }
+
+    function showRemoteMsg(msg, isErr) {
+      const el = document.getElementById('remote-form-msg');
+      el.innerHTML = '<div class="msg ' + (isErr ? 'err' : 'ok') + '">' + escapeHtml(msg) + '</div>';
+      setTimeout(() => { el.innerHTML = ''; }, 3000);
     }
 
     (async function init() {
